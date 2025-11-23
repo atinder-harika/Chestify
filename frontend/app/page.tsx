@@ -21,18 +21,27 @@ import { collection, query, onSnapshot, orderBy } from "firebase/firestore"
 import { addVideoToFirestore } from "@/lib/firestore-helpers"
 
 // Helper function to format timestamps
-function getTimeAgo(timestamp: string): string {
-  const now = new Date()
-  const past = new Date(timestamp)
-  const diffMs = now.getTime() - past.getTime()
-  const diffMins = Math.floor(diffMs / 60000)
-  const diffHours = Math.floor(diffMs / 3600000)
-  const diffDays = Math.floor(diffMs / 86400000)
-  
-  if (diffMins < 1) return 'Just now'
-  if (diffMins < 60) return `${diffMins} min${diffMins > 1 ? 's' : ''} ago`
-  if (diffHours < 24) return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`
-  return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`
+function formatShortDate(timestamp: any): string {
+  try {
+    // Handle Firestore Timestamp object
+    let date: Date;
+    if (timestamp?.toDate) {
+      date = timestamp.toDate();
+    } else if (timestamp?.seconds) {
+      date = new Date(timestamp.seconds * 1000);
+    } else {
+      date = new Date(timestamp);
+    }
+    
+    // Format as "23 Nov 2025"
+    return date.toLocaleDateString('en-GB', { 
+      day: 'numeric', 
+      month: 'short', 
+      year: 'numeric' 
+    });
+  } catch (error) {
+    return 'Just now';
+  }
 }
 
 // Mock items removed - using only real Firestore data
@@ -212,7 +221,7 @@ export default function ChestifyApp() {
       const recent = items.slice(0, 3).map((item) => ({
         url: item.url,
         status: item.status === 'verified' || item.status === 'misleading' ? item.status : 'processing',
-        timestamp: item.created_at ? getTimeAgo(item.created_at) : 'Just now'
+        timestamp: item.created_at ? formatShortDate(item.created_at) : 'Just now'
       }))
       setRecentActivity(recent)
     })
