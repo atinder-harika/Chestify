@@ -1,0 +1,188 @@
+"""
+AI Analysis Service using Google Gemini 1.5 Flash
+Performs summarization, categorization, and fact-checking with grounding
+"""
+
+import os
+import google.generativeai as genai
+from typing import Dict, List
+import logging
+from dotenv import load_dotenv
+
+load_dotenv()
+logger = logging.getLogger(__name__)
+
+# Initialize Gemini
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+if not GEMINI_API_KEY:
+    logger.warning("GEMINI_API_KEY not found in environment variables")
+else:
+    genai.configure(api_key=GEMINI_API_KEY)
+
+
+def analyze_content(title: str, transcript: str, url: str) -> Dict:
+    """
+    Analyze video content using Gemini with grounding
+    
+    Args:
+        title: Video title
+        transcript: Video transcript/description
+        url: Original video URL
+    
+    Returns:
+        Dictionary with summary, category, tags, and fact_check
+    """
+    try:
+        # Configure model with grounding (Google Search)
+        model = genai.GenerativeModel(
+            model_name='gemini-2.0-flash-exp',  # Using Gemini 2.0 Flash (free)
+            tools='google_search_retrieval'  # Enable grounding
+        )
+        
+        # Construct prompt
+        prompt = f"""
+You are analyzing educational short-form content for a learning platform called Chestify.
+
+**Content:**
+Title: {title}
+Transcript: {transcript[:1000]}
+URL: {url}
+
+**Task:**
+1. Generate a concise summary (2-3 sentences)
+2. Categorize into ONE of: Physics, Chemistry, Biology, Math, Computer Science, History, Psychology, Health, Web Development, Business, or Other
+3. Extract 3-5 relevant tags
+4. CRITICAL: Fact-check the claims using Google Search. Determine if the content is:
+   - "Verified": Accurate and supported by reliable sources
+   - "Questionable": Contains some inaccuracies or lacks sources
+   - "False": Contains misinformation or pseudoscience
+   - "Unverified": Cannot confirm accuracy
+
+**IMPORTANT:** For health claims, pseudoscience (like "alkaline water cures cancer"), or conspiracy theories, you MUST mark as "False" or "Questionable" and provide a corrective explanation with a source link.
+
+Return ONLY valid JSON with this structure:
+{{
+  "summary": "Brief explanation of the content...",
+  "category": "Category Name",
+  "tags": ["tag1", "tag2", "tag3"],
+  "fact_check": {{
+    "status": "Verified|Questionable|False|Unverified",
+    "reason": "Explanation of the fact-check result...",
+    "source_link": "https://reliable-source.com/article"
+  }},
+  "urgency_score": 7
+}}
+
+The urgency_score (1-10) indicates how useful/important this content is for learners.
+"""
+        
+        # Generate response with grounding
+        response = model.generate_content(prompt)
+        
+        # Parse JSON response
+        import json
+        result_text = response.text.strip()
+        
+        # Clean markdown code blocks if present
+        if result_text.startswith('```'):
+            result_text = result_text.split('```')[1]
+            if result_text.startswith('json'):
+                result_text = result_text[4:]
+            result_text = result_text.strip()
+        
+        result = json.loads(result_text)
+        
+        logger.info(f"AI analysis completed: {result.get('category')} - {result.get('fact_check', {}).get('status')}")
+        return result
+        
+    except json.JSONDecodeError as e:
+        logger.error(f"Failed to parse AI response as JSON: {str(e)}")
+        # Return fallback result
+        return get_fallback_analysis(title, transcript)
+        
+    except Exception as e:
+        logger.error(f"AI analysis failed: {str(e)}")
+        return get_fallback_analysis(title, transcript)
+
+
+def get_fallback_analysis(title: str, transcript: str) -> Dict:
+    """
+    Fallback analysis when AI fails
+    
+    Args:
+        title: Video title
+        transcript: Video transcript
+    
+    Returns:
+        Basic analysis dictionary
+    """
+    return {
+        "summary": f"Analysis of: {title}. {transcript[:100]}...",
+        "category": "Other",
+        "tags": ["Educational", "Video Content"],
+        "fact_check": {
+            "status": "Unverified",
+            "reason": "Unable to verify content at this time. Please review manually.",
+            "source_link": ""
+        },
+        "urgency_score": 5
+    }
+
+
+def generate_category_from_text(text: str) -> str:
+    """
+    Simple category extraction from text (fallback method)
+    
+    Args:
+        text: Combined title and transcript
+    
+    Returns:
+        Category string
+    """
+    text_lower = text.lower()
+    
+    category_keywords = {
+        "Physics": ["physics", "quantum", "mechanics", "energy", "force"],
+        "Chemistry": ["chemistry", "molecule", "reaction", "chemical", "element"],
+        "Biology": ["biology", "cell", "organism", "evolution", "genetics"],
+        "Math": ["math", "algebra", "calculus", "equation", "theorem"],
+        "Computer Science": ["code", "programming", "algorithm", "software", "python", "javascript"],
+        "Web Development": ["html", "css", "frontend", "backend", "react", "div"],
+        "Health": ["health", "diet", "fitness", "nutrition", "medical"],
+        "Psychology": ["psychology", "behavior", "mental", "cognitive"],
+        "Business": ["business", "marketing", "entrepreneur", "startup"],
+        "History": ["history", "historical", "ancient", "war", "civilization"]
+    }
+    
+    for category, keywords in category_keywords.items():
+        if any(keyword in text_lower for keyword in keywords):
+            return category
+    
+    return "Other"
+
+
+def extract_tags_from_text(text: str, max_tags: int = 5) -> List[str]:
+    """
+    Extract relevant tags from text
+    
+    Args:
+        text: Combined title and transcript
+        max_tags: Maximum number of tags to return
+    
+    Returns:
+        List of tags
+    """
+    # Common educational keywords
+    common_tags = [
+        "Science", "Education", "Tutorial", "Learning", "Explained",
+        "Quick Tips", "Study", "Knowledge", "Facts", "Guide"
+    ]
+    
+    text_lower = text.lower()
+    found_tags = [tag for tag in common_tags if tag.lower() in text_lower]
+    
+    # Add default if none found
+    if not found_tags:
+        found_tags = ["Educational", "Video Content"]
+    
+    return found_tags[:max_tags]
