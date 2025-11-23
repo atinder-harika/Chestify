@@ -12,6 +12,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { UserProfileDropdown } from "@/components/user-profile-dropdown"
 import { cn } from "@/lib/utils"
 import { auth, googleProvider, db } from "@/lib/firebase/config"
 import { signInWithPopup, onAuthStateChanged, User } from "firebase/auth"
@@ -173,6 +174,7 @@ export default function ChestifyApp() {
   const [user, setUser] = useState<User | null>(null)
   const [authLoading, setAuthLoading] = useState(true)
   const [view, setView] = useState<"landing" | "app">("landing")
+  const [manualSignOut, setManualSignOut] = useState(false)
   const [activeTab, setActiveTab] = useState<TabType>("library")
   const [filter, setFilter] = useState<FilterType>("all")
   const [urlInput, setUrlInput] = useState("")
@@ -219,13 +221,15 @@ export default function ChestifyApp() {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser)
-      if (currentUser) {
+      if (currentUser && !manualSignOut) {
         setView("app")
+      } else if (!currentUser) {
+        setView("landing")
       }
       setAuthLoading(false)
     })
     return () => unsubscribe()
-  }, [])
+  }, [manualSignOut])
 
   // Firestore real-time listener for user's items
   useEffect(() => {
@@ -250,6 +254,7 @@ export default function ChestifyApp() {
 
   const handleSignIn = async () => {
     try {
+      setManualSignOut(false)
       await signInWithPopup(auth, googleProvider)
     } catch (error) {
       console.error("Sign in error:", error)
@@ -511,6 +516,25 @@ export default function ChestifyApp() {
                 >
                   {isDark ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
                 </Button>
+
+                {/* User Profile Dropdown */}
+                {user && (
+                  <UserProfileDropdown
+                    isDark={isDark}
+                    onSignOut={async () => {
+                      setManualSignOut(true)
+                      await auth.signOut()
+                      setView("landing")
+                    }}
+                    user={{
+                      displayName: user.displayName || "User",
+                      email: user.email || "",
+                      photoURL: user.photoURL || "",
+                      initials: (user.displayName || "U").substring(0, 2).toUpperCase(),
+                    }}
+                    currentTheme={currentTheme}
+                  />
+                )}
               </div>
             </div>
           </div>
