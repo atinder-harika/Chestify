@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
+import { DirectionAwareHover } from "@/components/direction-aware-hover"
 import { CheckCircle2, AlertTriangle, Loader2, Send, Plus, Package, Moon, Sun, Clock, Palette } from "lucide-react"
 import {
   DropdownMenu,
@@ -637,11 +638,11 @@ export default function ChestifyApp() {
 
               <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
                 {filteredItems.map((item) => (
-                  <Card
+                  <DirectionAwareHover
                     key={item.id}
+                    imageUrl={item.thumbnail || "/placeholder.svg"}
                     className={cn(
-                      "group backdrop-blur-md border transition-all duration-500 ease-out hover:-translate-y-3 overflow-hidden relative cursor-pointer h-[400px] flex flex-col",
-                      isDark ? "bg-neutral-900/60" : "bg-white shadow-sm",
+                      "w-full aspect-[9/16] border transition-all duration-300",
                       item.status === "verified" &&
                         (isDark
                           ? "border-cyan-500/30 hover:border-cyan-500/60 hover:shadow-[0_20px_50px_-12px_rgba(6,182,212,0.4)]"
@@ -655,199 +656,93 @@ export default function ChestifyApp() {
                           ? "border-purple-400/30 hover:border-purple-400/60 hover:shadow-[0_20px_50px_-12px_rgba(168,85,247,0.4)]"
                           : "border-purple-300 hover:border-purple-400 hover:shadow-[0_20px_50px_-12px_rgba(168,85,247,0.3)]"),
                     )}
+                    childrenClassName="inset-0 flex flex-col justify-between p-6"
                   >
-                    {/* Thumbnail Section - Fixed at top */}
-                    <div className="relative w-full flex-1 overflow-hidden">
-                      <img
-                        src={item.thumbnail || "/placeholder.svg"}
-                        alt={item.title}
-                        className="w-full h-full object-cover"
-                      />
-                      {/* Platform Badge */}
-                      <Badge
-                        className={cn(
-                          "absolute top-3 right-3 backdrop-blur-sm text-xs z-10",
-                          isDark
-                            ? "bg-black/70 text-white/90 border-white/20"
-                            : "bg-white/90 text-neutral-900 border-neutral-200",
-                        )}
-                      >
+                    {/* Top Section: Platform Badge and Status Icon */}
+                    <div className="flex items-start justify-between">
+                      <Badge className="backdrop-blur-sm text-xs bg-black/70 text-white/90 border-white/20">
                         {item.url.includes("youtube") ? "YouTube Shorts" : "TikTok"}
                       </Badge>
+                      <div>
+                        {item.status === "verified" && <CheckCircle2 className="w-5 h-5 text-cyan-400" />}
+                        {item.status === "misleading" && <AlertTriangle className="w-5 h-5 text-orange-400" />}
+                        {item.status === "processing" && <Loader2 className="w-5 h-5 animate-spin text-purple-400" />}
+                      </div>
                     </div>
 
-                    {/* Info Bar - Compact by default, expands on hover to cover thumbnail */}
-                    <div
-                      className={cn(
-                        "absolute bottom-0 left-0 right-0 transition-all duration-500 ease-out backdrop-blur-xl",
-                        // Default: small bar at bottom
-                        "h-24 group-hover:h-full group-hover:top-0",
-                        isDark ? "bg-black/90 border-t border-white/10" : "bg-white/95 border-t border-neutral-200",
+                    {/* Bottom Section: Content */}
+                    <div className="space-y-3">
+                      {/* Title and Category */}
+                      <div>
+                        <Badge variant="outline" className="text-xs border-white/30 text-white/70 mb-2">
+                          {item.category}
+                        </Badge>
+                        <h3 className="text-lg font-semibold text-white mb-2">{item.title}</h3>
+                      </div>
+
+                      {/* Tags */}
+                      <div className="flex flex-wrap gap-2">
+                        {item.tags.map((tag: string) => (
+                          <Badge key={tag} variant="secondary" className="text-xs bg-white/10 text-white/80 border-white/20">
+                            {tag}
+                          </Badge>
+                        ))}
+                      </div>
+
+                      {/* Status-specific content */}
+                      {item.status === "processing" ? (
+                        <div className="space-y-2">
+                          <div className="h-3 rounded animate-pulse bg-white/20" />
+                          <div className="h-3 rounded animate-pulse w-3/4 bg-white/20" />
+                        </div>
+                      ) : (
+                        <div className="space-y-3">
+                          {/* Fact Check Status Box */}
+                          <div
+                            className={cn(
+                              "p-3 rounded-lg border backdrop-blur-sm",
+                              item.status === "verified"
+                                ? "bg-cyan-500/20 border-cyan-400/40"
+                                : "bg-orange-500/20 border-orange-400/40",
+                            )}
+                          >
+                            <p
+                              className={cn(
+                                "text-xs font-semibold mb-1",
+                                item.status === "verified" ? "text-cyan-300" : "text-orange-300",
+                              )}
+                            >
+                              {item.status === "verified" ? "✓ VERIFIED" : "⚠ MISLEADING"}
+                            </p>
+                            <p className="text-xs text-white/90 mb-2">{item.fact_check.reason}</p>
+                            {item.fact_check.source_link && (
+                              <a
+                                href={item.fact_check.source_link}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className={cn(
+                                  "text-xs underline block",
+                                  item.status === "verified" ? "text-cyan-300 hover:text-cyan-200" : "text-orange-300 hover:text-orange-200",
+                                )}
+                              >
+                                Source
+                              </a>
+                            )}
+                          </div>
+
+                          {/* View AI Analysis Button for misleading content */}
+                          {item.status === "misleading" && (
+                            <Button
+                              size="sm"
+                              className="w-full rounded-full text-xs bg-orange-500/30 text-orange-200 hover:bg-orange-500/40 border border-orange-400/40"
+                            >
+                              View AI Analysis
+                            </Button>
+                          )}
+                        </div>
                       )}
-                    >
-                      {/* Compact View Content - visible by default */}
-                      <div className="absolute bottom-0 left-0 right-0 p-4 transition-all duration-500 ease-out group-hover:opacity-0 group-hover:translate-y-4">
-                        <div className="flex items-center justify-between mb-2">
-                          <Badge
-                            variant="outline"
-                            className={cn(
-                              "text-xs",
-                              isDark ? "border-white/20 text-white/60" : "border-neutral-300 text-neutral-600",
-                            )}
-                          >
-                            {item.category}
-                          </Badge>
-                          {item.status === "verified" && (
-                            <CheckCircle2 className={cn("w-4 h-4", isDark ? "text-cyan-400" : "text-teal-600")} />
-                          )}
-                          {item.status === "misleading" && (
-                            <AlertTriangle className={cn("w-4 h-4", isDark ? "text-orange-500" : "text-orange-600")} />
-                          )}
-                          {item.status === "processing" && (
-                            <Loader2
-                              className={cn("w-4 h-4 animate-spin", isDark ? "text-purple-400" : "text-purple-600")}
-                            />
-                          )}
-                        </div>
-                        <h3
-                          className={cn("text-sm font-medium line-clamp-1", isDark ? "text-white" : "text-neutral-900")}
-                        >
-                          {item.title}
-                        </h3>
-                      </div>
-
-                      {/* Expanded View Content - visible on hover */}
-                      <div className="opacity-0 group-hover:opacity-100 transition-all duration-500 ease-out p-6 h-full overflow-y-auto">
-                        <div className="flex items-start justify-between mb-4">
-                          <Badge
-                            variant="outline"
-                            className={cn(
-                              "text-xs",
-                              isDark ? "border-white/20 text-white/60" : "border-neutral-300 text-neutral-600",
-                            )}
-                          >
-                            {item.category}
-                          </Badge>
-                          {item.status === "verified" && (
-                            <CheckCircle2 className={cn("w-5 h-5", isDark ? "text-cyan-400" : "text-teal-600")} />
-                          )}
-                          {item.status === "misleading" && (
-                            <AlertTriangle className={cn("w-5 h-5", isDark ? "text-orange-500" : "text-orange-600")} />
-                          )}
-                          {item.status === "processing" && (
-                            <Loader2
-                              className={cn("w-5 h-5 animate-spin", isDark ? "text-purple-400" : "text-purple-600")}
-                            />
-                          )}
-                        </div>
-
-                        <h3 className={cn("text-lg font-semibold mb-3", isDark ? "text-white" : "text-neutral-900")}>
-                          {item.title}
-                        </h3>
-
-                        {/* Tags */}
-                        <div className="flex flex-wrap gap-2 mb-4">
-                          {item.tags.map((tag: string) => (
-                            <Badge
-                              key={tag}
-                              variant="secondary"
-                              className={cn(
-                                "text-xs",
-                                isDark
-                                  ? "bg-white/5 text-white/80 border-white/10"
-                                  : "bg-neutral-100 text-neutral-700 border-neutral-200",
-                              )}
-                            >
-                              {tag}
-                            </Badge>
-                          ))}
-                        </div>
-
-                        {/* Status-specific content */}
-                        {item.status === "processing" ? (
-                          <div className="space-y-2">
-                            <div
-                              className={cn("h-3 rounded animate-pulse", isDark ? "bg-white/10" : "bg-neutral-200")}
-                            />
-                            <div
-                              className={cn(
-                                "h-3 rounded animate-pulse w-3/4",
-                                isDark ? "bg-white/10" : "bg-neutral-200",
-                              )}
-                            />
-                          </div>
-                        ) : (
-                          <div className="space-y-4">
-                            {/* Fact Check Status Box */}
-                            <div
-                              className={cn(
-                                "p-4 rounded-lg border",
-                                item.status === "verified"
-                                  ? isDark
-                                    ? "bg-cyan-500/10 border-cyan-500/30"
-                                    : "bg-teal-50 border-teal-300"
-                                  : isDark
-                                    ? "bg-orange-500/10 border-orange-500/30"
-                                    : "bg-orange-50 border-orange-300",
-                              )}
-                            >
-                              <p
-                                className={cn(
-                                  "text-xs font-semibold mb-2",
-                                  item.status === "verified"
-                                    ? isDark
-                                      ? "text-cyan-400"
-                                      : "text-teal-700"
-                                    : isDark
-                                      ? "text-orange-400"
-                                      : "text-orange-700",
-                                )}
-                              >
-                                {item.status === "verified" ? "✓ VERIFIED" : "⚠ MISLEADING"}
-                              </p>
-                              <p className={cn("text-xs mb-2", isDark ? "text-white/80" : "text-neutral-700")}>
-                                {item.fact_check.reason}
-                              </p>
-                              {item.fact_check.source_link && (
-                                <a
-                                  href={item.fact_check.source_link}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className={cn(
-                                    "text-xs underline block",
-                                    item.status === "verified"
-                                      ? isDark
-                                        ? "text-cyan-300 hover:text-cyan-200"
-                                        : "text-teal-600 hover:text-teal-700"
-                                      : isDark
-                                        ? "text-orange-300 hover:text-orange-200"
-                                        : "text-orange-600 hover:text-orange-700",
-                                  )}
-                                >
-                                  Source
-                                </a>
-                              )}
-                            </div>
-
-                            {/* View AI Analysis Button for misleading content */}
-                            {item.status === "misleading" && (
-                              <Button
-                                size="sm"
-                                className={cn(
-                                  "w-full rounded-full text-xs",
-                                  isDark
-                                    ? "bg-orange-500/20 text-orange-400 hover:bg-orange-500/30 border border-orange-500/30"
-                                    : "bg-orange-100 text-orange-700 hover:bg-orange-200 border border-orange-300",
-                                )}
-                              >
-                                View AI Analysis
-                              </Button>
-                            )}
-                          </div>
-                        )}
-                      </div>
                     </div>
-                  </Card>
+                  </DirectionAwareHover>
                 ))}
               </div>
             </div>
