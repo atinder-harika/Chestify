@@ -5,7 +5,13 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
-import { CheckCircle2, AlertTriangle, Loader2, Send, Plus, Package, Moon, Sun, Clock } from "lucide-react"
+import { CheckCircle2, AlertTriangle, Loader2, Send, Plus, Package, Moon, Sun, Clock, Palette } from "lucide-react"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { cn } from "@/lib/utils"
 import { auth, googleProvider, db } from "@/lib/firebase/config"
 import { signInWithPopup, onAuthStateChanged, User } from "firebase/auth"
@@ -76,6 +82,93 @@ type RecentActivity = {
   timestamp: string
 }
 
+const themes = {
+  gold: {
+    name: "Chestify Gold",
+    gradient: "from-yellow-400 to-white",
+    gradientDark: "from-yellow-400 via-yellow-200 to-white",
+    buttonGradient: "from-yellow-400 to-yellow-200",
+    buttonHover: "from-yellow-300 to-yellow-100",
+    activeTab: "bg-yellow-500/20 text-yellow-400 border-yellow-500/50",
+    activeTabLight: "bg-yellow-400 text-black border-yellow-400",
+    filterActive: "from-yellow-400 to-yellow-200",
+    icon: "text-yellow-400",
+    buttonShadow: undefined,
+  },
+  blue: {
+    name: "Cyber Blue",
+    gradient: "from-cyan-400 to-blue-600",
+    gradientDark: "from-cyan-400 via-blue-400 to-blue-600",
+    buttonGradient: "from-cyan-400 to-blue-500",
+    buttonHover: "from-cyan-300 to-blue-400",
+    activeTab: "bg-cyan-500/20 text-cyan-400 border-cyan-500/50",
+    activeTabLight: "bg-cyan-400 text-black border-cyan-400",
+    filterActive: "from-cyan-400 to-blue-500",
+    icon: "text-cyan-400",
+    buttonShadow: undefined,
+  },
+  purple: {
+    name: "Neon Purple",
+    gradient: "from-fuchsia-500 to-pink-600",
+    gradientDark: "from-fuchsia-500 via-pink-400 to-pink-600",
+    buttonGradient: "from-fuchsia-500 to-pink-500",
+    buttonHover: "from-fuchsia-400 to-pink-400",
+    activeTab: "bg-fuchsia-500/20 text-fuchsia-400 border-fuchsia-500/50",
+    activeTabLight: "bg-fuchsia-400 text-black border-fuchsia-400",
+    filterActive: "from-fuchsia-500 to-pink-500",
+    icon: "text-fuchsia-400",
+    buttonShadow: undefined,
+  },
+  green: {
+    name: "Hacker Green",
+    gradient: "from-emerald-400 to-lime-500",
+    gradientDark: "from-emerald-400 via-lime-400 to-lime-500",
+    buttonGradient: "from-emerald-400 to-lime-400",
+    buttonHover: "from-emerald-300 to-lime-300",
+    activeTab: "bg-emerald-500/20 text-emerald-400 border-emerald-500/50",
+    activeTabLight: "bg-emerald-400 text-black border-emerald-400",
+    filterActive: "from-emerald-400 to-lime-400",
+    icon: "text-emerald-400",
+    buttonShadow: undefined,
+  },
+  inferno: {
+    name: "Inferno",
+    gradient: "from-red-600 to-orange-500",
+    gradientDark: "from-red-600 to-orange-500",
+    buttonGradient: "from-red-600 to-orange-500",
+    buttonHover: "from-red-500 to-orange-400",
+    activeTab: "bg-gradient-to-br from-red-600/20 to-orange-500/20 border-red-500/50 text-orange-100",
+    activeTabLight: "bg-gradient-to-r from-red-600 to-orange-500 text-white border-red-500",
+    filterActive: "from-red-600 to-orange-500",
+    icon: "text-red-500",
+    buttonShadow: "shadow-[0_0_15px_rgba(220,38,38,0.5)]",
+  },
+  aurora: {
+    name: "Aurora",
+    gradient: "from-indigo-500 to-cyan-400",
+    gradientDark: "from-indigo-500 via-purple-500 to-cyan-400",
+    buttonGradient: "from-indigo-600 to-cyan-500",
+    buttonHover: "from-indigo-500 to-cyan-400",
+    activeTab: "bg-gradient-to-br from-indigo-600/20 to-cyan-500/20 border-indigo-500/50 text-cyan-50",
+    activeTabLight: "bg-gradient-to-r from-indigo-600 to-cyan-500 text-white border-indigo-500",
+    filterActive: "from-indigo-600 to-cyan-500",
+    icon: "text-indigo-400",
+    buttonShadow: "shadow-[0_0_15px_rgba(79,70,229,0.5)]",
+  },
+  "fire-ice": {
+    name: "Fire & Ice",
+    gradient: "from-blue-600 to-red-500",
+    gradientDark: "from-blue-600 to-red-500",
+    buttonGradient: "from-blue-600 to-red-500",
+    buttonHover: "from-blue-500 to-red-400",
+    activeTab: "bg-gradient-to-br from-blue-600/20 to-red-500/20 border-blue-500/50 text-blue-100",
+    activeTabLight: "bg-gradient-to-r from-blue-600 to-red-500 text-white border-blue-500",
+    filterActive: "from-blue-600 to-red-500",
+    icon: "text-blue-500",
+    buttonShadow: "shadow-[0_0_15px_rgba(37,99,235,0.5)]",
+  },
+}
+
 export default function ChestifyApp() {
   const [user, setUser] = useState<User | null>(null)
   const [authLoading, setAuthLoading] = useState(true)
@@ -87,12 +180,40 @@ export default function ChestifyApp() {
   const [chatInput, setChatInput] = useState("")
   const [messages, setMessages] = useState<Array<{ role: "user" | "assistant"; content: string }>>([])
   const [isDark, setIsDark] = useState(true)
+  const [activeTheme, setActiveTheme] = useState<keyof typeof themes>("fire-ice")
   const [recentActivity, setRecentActivity] = useState<RecentActivity[]>([
     { url: "https://youtube.com/shorts/physics-intro", status: "verified", timestamp: "2 hours ago" },
     { url: "https://youtube.com/shorts/marketing-tips", status: "processing", timestamp: "5 hours ago" },
     { url: "https://tiktok.com/@user/video123", status: "failed", timestamp: "1 day ago" },
   ])
   const [firestoreItems, setFirestoreItems] = useState<any[]>([])
+
+  const currentTheme = themes[activeTheme]
+
+  // Load theme from localStorage on mount
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const savedTheme = localStorage.getItem("chestify-theme")
+        if (savedTheme && savedTheme in themes) {
+          setActiveTheme(savedTheme as keyof typeof themes)
+        }
+      } catch (error) {
+        console.error("Error loading theme:", error)
+      }
+    }
+  }, [])
+
+  // Save theme to localStorage when it changes
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      try {
+        localStorage.setItem("chestify-theme", activeTheme)
+      } catch (error) {
+        console.error("Error saving theme:", error)
+      }
+    }
+  }, [activeTheme])
 
   // Firebase auth listener
   useEffect(() => {
@@ -229,12 +350,64 @@ export default function ChestifyApp() {
             "to-transparent",
           )}
         />
+
+        <header className="absolute top-0 right-0 p-6 z-20">
+          <div className="flex items-center gap-4">
+            {/* Theme Color Picker */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className={cn(
+                    "rounded-full",
+                    isDark ? `${currentTheme.icon} hover:bg-white/10` : "text-neutral-600 hover:bg-neutral-100",
+                  )}
+                >
+                  <Palette className="w-5 h-5" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                align="end"
+                className={cn(
+                  "w-48 backdrop-blur-md border",
+                  isDark ? "bg-neutral-900/80 border-white/10" : "bg-white border-neutral-200",
+                )}
+              >
+                {Object.entries(themes).map(([key, theme]) => (
+                  <DropdownMenuItem
+                    key={key}
+                    onClick={() => setActiveTheme(key as keyof typeof themes)}
+                    className={cn("cursor-pointer flex items-center gap-2", activeTheme === key && "bg-white/10")}
+                  >
+                    <div className={`w-4 h-4 rounded-full bg-gradient-to-r ${theme.buttonGradient}`} />
+                    <span className={isDark ? "text-white" : "text-neutral-900"}>{theme.name}</span>
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            {/* Light/Dark Toggle */}
+            <Button
+              onClick={() => setIsDark(!isDark)}
+              variant="ghost"
+              size="icon"
+              className={cn(
+                "rounded-full",
+                isDark ? `${currentTheme.icon} hover:bg-white/10` : "text-neutral-600 hover:bg-neutral-100",
+              )}
+            >
+              {isDark ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+            </Button>
+          </div>
+        </header>
+
         <div className="relative z-10 flex flex-col items-center justify-center min-h-screen px-6">
           <div className="max-w-4xl mx-auto text-center space-y-8">
             <h1
               className={cn(
                 "text-5xl md:text-7xl font-semibold leading-tight bg-gradient-to-r bg-clip-text text-transparent",
-                isDark ? "from-yellow-400 via-yellow-200 to-white" : "from-yellow-500 via-yellow-400 to-yellow-600",
+                isDark ? currentTheme.gradientDark : currentTheme.gradient,
               )}
             >
               Turn short-form noise into a treasure chest of knowledge
@@ -244,7 +417,12 @@ export default function ChestifyApp() {
             </p>
             <Button
               onClick={handleSignIn}
-              className="mt-8 px-12 py-6 text-lg rounded-full bg-gradient-to-r from-yellow-400 to-yellow-200 text-black hover:from-yellow-300 hover:to-yellow-100 font-medium"
+              className={cn(
+                "mt-8 px-12 py-6 text-lg rounded-full bg-gradient-to-r font-medium transition-all",
+                `${currentTheme.buttonGradient}`,
+                isDark ? "text-white" : "text-black",
+                currentTheme.buttonShadow || "",
+              )}
             >
               Get In Touch / Sign In
             </Button>
@@ -276,27 +454,64 @@ export default function ChestifyApp() {
           <div className="container mx-auto px-6 py-6">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <Package className="w-7 h-7 text-yellow-400" />
+                <Package className={`w-7 h-7 ${currentTheme.icon}`} />
                 <h1
                   className={cn(
                     "text-3xl font-bold bg-gradient-to-r bg-clip-text text-transparent",
-                    isDark ? "from-yellow-400 to-white" : "from-yellow-500 to-yellow-600",
+                    isDark ? currentTheme.gradient : currentTheme.gradient,
                   )}
                 >
                   Chestify
                 </h1>
               </div>
-              <Button
-                onClick={() => setIsDark(!isDark)}
-                variant="ghost"
-                size="icon"
-                className={cn(
-                  "rounded-full",
-                  isDark ? "text-yellow-400 hover:bg-yellow-500/10" : "text-neutral-600 hover:bg-neutral-100",
-                )}
-              >
-                {isDark ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
-              </Button>
+              <div className="flex items-center gap-4">
+                {/* Theme Color Picker */}
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className={cn(
+                        "rounded-full",
+                        isDark ? `${currentTheme.icon} hover:bg-white/10` : "text-neutral-600 hover:bg-neutral-100",
+                      )}
+                    >
+                      <Palette className="w-5 h-5" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent
+                    align="end"
+                    className={cn(
+                      "w-48 backdrop-blur-md border",
+                      isDark ? "bg-neutral-900/80 border-white/10" : "bg-white border-neutral-200",
+                    )}
+                  >
+                    {Object.entries(themes).map(([key, theme]) => (
+                      <DropdownMenuItem
+                        key={key}
+                        onClick={() => setActiveTheme(key as keyof typeof themes)}
+                        className={cn("cursor-pointer flex items-center gap-2", activeTheme === key && "bg-white/10")}
+                      >
+                        <div className={`w-4 h-4 rounded-full bg-gradient-to-r ${theme.buttonGradient}`} />
+                        <span className={isDark ? "text-white" : "text-neutral-900"}>{theme.name}</span>
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+
+                {/* Light/Dark Toggle */}
+                <Button
+                  onClick={() => setIsDark(!isDark)}
+                  variant="ghost"
+                  size="icon"
+                  className={cn(
+                    "rounded-full",
+                    isDark ? `${currentTheme.icon} hover:bg-white/10` : "text-neutral-600 hover:bg-neutral-100",
+                  )}
+                >
+                  {isDark ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+                </Button>
+              </div>
             </div>
           </div>
         </header>
@@ -315,8 +530,8 @@ export default function ChestifyApp() {
                   "rounded-full px-6",
                   activeTab === "add"
                     ? isDark
-                      ? "bg-yellow-500/20 text-yellow-400 border border-yellow-500/50"
-                      : "bg-yellow-400 text-black border border-yellow-400"
+                      ? currentTheme.activeTab
+                      : currentTheme.activeTabLight
                     : isDark
                       ? "text-white/60 hover:text-white hover:bg-white/5"
                       : "text-neutral-600 hover:text-neutral-900 hover:bg-neutral-100",
@@ -332,8 +547,8 @@ export default function ChestifyApp() {
                   "rounded-full px-6",
                   activeTab === "library"
                     ? isDark
-                      ? "bg-yellow-500/20 text-yellow-400 border border-yellow-500/50"
-                      : "bg-yellow-400 text-black border border-yellow-400"
+                      ? currentTheme.activeTab
+                      : currentTheme.activeTabLight
                     : isDark
                       ? "text-white/60 hover:text-white hover:bg-white/5"
                       : "text-neutral-600 hover:text-neutral-900 hover:bg-neutral-100",
@@ -348,8 +563,8 @@ export default function ChestifyApp() {
                   "rounded-full px-6",
                   activeTab === "chat"
                     ? isDark
-                      ? "bg-yellow-500/20 text-yellow-400 border border-yellow-500/50"
-                      : "bg-yellow-400 text-black border border-yellow-400"
+                      ? currentTheme.activeTab
+                      : currentTheme.activeTabLight
                     : isDark
                       ? "text-white/60 hover:text-white hover:bg-white/5"
                       : "text-neutral-600 hover:text-neutral-900 hover:bg-neutral-100",
@@ -367,7 +582,7 @@ export default function ChestifyApp() {
                 <h2
                   className={cn(
                     "text-3xl font-bold mb-2 bg-gradient-to-r bg-clip-text text-transparent",
-                    isDark ? "from-yellow-400 to-white" : "from-yellow-500 to-yellow-600",
+                    isDark ? currentTheme.gradient : currentTheme.gradient,
                   )}
                 >
                   Your Video Chest
@@ -380,11 +595,11 @@ export default function ChestifyApp() {
                   {["All", "Verified", "Misleading", "Processing"].map((filterOption) => (
                     <button
                       key={filterOption}
-                      onClick={() => setFilter(filterOption.toLowerCase())}
+                      onClick={() => setFilter(filterOption.toLowerCase() as FilterType)}
                       className={cn(
                         "px-4 py-2 rounded-full text-sm font-medium transition-all duration-300",
                         filter === filterOption.toLowerCase()
-                          ? "bg-gradient-to-r from-yellow-400 to-yellow-200 text-black"
+                          ? `bg-gradient-to-r ${currentTheme.filterActive} text-black`
                           : isDark
                             ? "bg-white/5 text-white/60 hover:bg-white/10 border border-white/10"
                             : "bg-neutral-100 text-neutral-600 hover:bg-neutral-200 border border-neutral-200",
@@ -508,7 +723,7 @@ export default function ChestifyApp() {
 
                         {/* Tags */}
                         <div className="flex flex-wrap gap-2 mb-4">
-                          {item.tags.map((tag) => (
+                          {item.tags.map((tag: string) => (
                             <Badge
                               key={tag}
                               variant="secondary"
@@ -625,7 +840,7 @@ export default function ChestifyApp() {
                   <CardTitle
                     className={cn(
                       "text-2xl font-semibold bg-gradient-to-r bg-clip-text text-transparent",
-                      isDark ? "from-yellow-400 to-white" : "from-yellow-500 to-yellow-600",
+                      isDark ? currentTheme.gradient : currentTheme.gradient,
                     )}
                   >
                     Add Video to Your Chest
@@ -640,7 +855,6 @@ export default function ChestifyApp() {
                     value={urlInput}
                     onChange={(e) => setUrlInput(e.target.value)}
                     className={cn(
-                      "focus:border-yellow-500/50",
                       isDark
                         ? "bg-white/5 border-white/20 text-white placeholder:text-white/40"
                         : "bg-white border-neutral-300 text-neutral-900 placeholder:text-neutral-400",
@@ -649,7 +863,12 @@ export default function ChestifyApp() {
                   <Button
                     onClick={handleAddVideo}
                     disabled={isAdding || !urlInput.trim()}
-                    className="w-full rounded-full bg-gradient-to-r from-yellow-400 to-yellow-200 text-black hover:from-yellow-300 hover:to-yellow-100 font-medium"
+                    className={cn(
+                      "w-full rounded-full bg-gradient-to-r font-medium transition-all",
+                      `${currentTheme.buttonGradient}`,
+                      isDark ? "text-white" : "text-black",
+                      currentTheme.buttonShadow || "",
+                    )}
                   >
                     {isAdding ? (
                       <>
@@ -727,7 +946,7 @@ export default function ChestifyApp() {
               <h2
                 className={cn(
                   "text-4xl font-semibold bg-gradient-to-r bg-clip-text text-transparent mb-6",
-                  isDark ? "from-yellow-400 to-white" : "from-yellow-500 to-yellow-600",
+                  isDark ? currentTheme.gradient : currentTheme.gradient,
                 )}
               >
                 Chat
@@ -763,8 +982,8 @@ export default function ChestifyApp() {
                               "p-4 rounded-lg max-w-[80%]",
                               msg.role === "user"
                                 ? isDark
-                                  ? "ml-auto bg-yellow-500/20 border border-yellow-500/30 text-white"
-                                  : "ml-auto bg-yellow-100 border border-yellow-300 text-neutral-900"
+                                  ? `ml-auto border text-white ${currentTheme.activeTab}`
+                                  : `ml-auto border text-neutral-900 ${currentTheme.activeTabLight}`
                                 : isDark
                                   ? "mr-auto bg-white/5 border border-white/10 text-white/90"
                                   : "mr-auto bg-neutral-100 border border-neutral-200 text-neutral-900",
@@ -823,7 +1042,6 @@ export default function ChestifyApp() {
                         onChange={(e) => setChatInput(e.target.value)}
                         onKeyDown={(e) => e.key === "Enter" && handleSendMessage()}
                         className={cn(
-                          "focus:border-yellow-500/50",
                           isDark
                             ? "bg-white/5 border-white/20 text-white placeholder:text-white/40"
                             : "bg-white border-neutral-300 text-neutral-900 placeholder:text-neutral-400",
@@ -833,10 +1051,10 @@ export default function ChestifyApp() {
                         onClick={handleSendMessage}
                         disabled={!chatInput.trim()}
                         className={cn(
-                          "rounded-full",
+                          "rounded-full border",
                           isDark
-                            ? "bg-yellow-500/20 text-yellow-400 border border-yellow-500/50 hover:bg-yellow-500/30"
-                            : "bg-yellow-400 text-black border border-yellow-400 hover:bg-yellow-300",
+                            ? currentTheme.activeTab
+                            : currentTheme.activeTabLight,
                         )}
                       >
                         <Send className="w-4 h-4" />
