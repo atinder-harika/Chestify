@@ -1,0 +1,24 @@
+# --- General ---
+.DS_Store
+*.log
+
+# --- Frontend (Node/Next.js) ---
+frontend/node_modules
+frontend/.next
+frontend/out
+frontend/.env
+frontend/.env.local
+frontend/.vercel
+
+# --- Backend (Python/FastAPI) ---
+backend/__pycache__
+backend/venv
+backend/.venv
+backend/env
+backend/.env
+backend/*.pyc
+backend/.pytest_cache
+
+# --- IDEs ---
+.vscode
+.idea
