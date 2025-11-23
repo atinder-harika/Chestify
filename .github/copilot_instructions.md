@@ -1,22 +1,19 @@
-# Product Requirements Document & Copilot Instructions: Chestify
-
-**Theme:** AI & Data Science for Social Good (SDG 4: Quality Education)
-**Tagline:** Turn short-form noise into a treasure chest of knowledge.
-
-## 1. Executive Summary
-Chestify is a web application that helps users curate educational short-form content. The app uses AI to extract transcripts, fact-check claims against Google Search, and organize content.
-
-## 2. Technical Architecture
-* **Frontend:** Next.js 14 (App Router), Tailwind CSS, Lucide React.
-* **Backend:** Python FastAPI.
-* **Database:** Firebase Firestore & Auth.
-* **AI:** Google Gemini 1.5 Flash + Grounding.
-
-## 3. Data Structure (Firestore)
-Collection: `users/{userId}/items/{itemId}`
-Fields: url, title, summary, transcript, category, tags[], fact_check (status, reason), status (processing/completed).
-
-## 4. Coding Rules
-* **Frontend:** Use `shadcn/ui`. Use Client Components for Firestore listeners. NEVER wait for AI HTTP response (Async flow).
-* **Backend:** Use `pydantic`. Handle `yt_dlp` errors gracefully.
-* **Grounding:** Use Google Search Tool in Gemini SDK.
+Chestify: Hackathon Master Instructions (PRD)Project Name: ChestifyTheme: AI & Data Science for Social Good (SDG 4: Quality Education)Goal: A "Treasure Chest" for educational short-form content that filters out misinformation using AI Grounding.1. Tech Stack (Strict Constraints)Frontend: Next.js 14 (App Router), Tailwind CSS, Shadcn/UI, Lucide Icons.Hosting: Vercel.Backend: Python 3.10+ (FastAPI).Hosting: Railway.Database: Firebase Firestore (NoSQL).Auth: Firebase Authentication (Google Provider).AI Engine: Google Gemini 1.5 Flash (via google-generativeai SDK).Tools: yt_dlp (Video Extraction), Google Search Tool (Grounding).2. Core Architecture & Data FlowThe app follows a Service-Based Architecture. The Frontend and Backend do not communicate synchronously via HTTP for long tasks. They communicate via Firestore State.Ingest (Frontend): User adds URL -> Frontend writes doc to users/{uid}/items with status: "processing".Process (Backend): Python script listens to Firestore collection -> Detects new doc -> Runs Analysis.Update (Backend): Python updates doc with transcript, summary, fact_check, and status: "completed".Display (Frontend): Real-time listener detects the update -> UI updates automatically.3. Data Schema (Firestore)Path: users/{userId}/items/{itemId}{
+  "id": "auto-generated-id",
+  "url": "[https://youtube.com/shorts/xyz](https://youtube.com/shorts/xyz)",
+  "title": "Quantum Physics in 60s",
+  "thumbnail": "[https://img.youtube.com/](https://img.youtube.com/)...",
+  "summary": "Explains the observer effect...",
+  "transcript": "Full text extraction...",
+  "category": "Physics", // AI Generated
+  "tags": ["Science", "Quantum", "Education"],
+  "fact_check": {
+    "status": "Verified", // Options: "Verified", "Questionable", "False", "Unverified"
+    "reason": "This aligns with standard physics textbooks.",
+    "source_link": "[https://wikipedia.org/wiki/Observer_effect](https://wikipedia.org/wiki/Observer_effect)"
+  },
+  "urgency_score": 8, // 1-10 (How useful is this?)
+  "status": "completed", // Options: "processing", "completed", "error"
+  "created_at": "Timestamp"
+}
+4. Feature RequirementsFeature A: The "No-BS" Ingest (Backend Logic)Library: Use yt_dlp to extract metadata. Handle errors (private videos) gracefully by setting status: "error".AI Prompting:Ask Gemini to summarize and categorize.CRITICAL: Use the Google Search Tool to verify claims.If the video contains pseudoscientific claims (e.g., "Earth is flat"), the fact_check.status MUST be "False".Feature B: The Dashboard (Frontend UI)Layout: Masonry Grid of cards.States:Processing: Show a skeleton card with a pulsing animation.Error: Show a "Broken Link" card with a delete button.Success: Show the full card with the Thumbnail.Visual Indicators:Green Shield: Verified Content.Red Warning: Misleading Content.Feature C: Chat with Chest (RAG)Context: When a user asks a question, fetch the last 20 items from their Chest.Prompt: "Answer the user based ONLY on the following summaries. If the answer is not in the chest, say so."5. Coding StandardsFrontend:Use Server Actions for simple writes.Use Client Components ('use client') for onSnapshot (Realtime listeners).Do NOT use complex Redux. Use React Context or simple State.Backend:Use pydantic models for Type Safety.Keep the main.py clean. Move AI logic to services/ai_service.py.Use Environment Variables for ALL keys (GEMINI_API_KEY, FIREBASE_CREDENTIALS).6. Testing StrategySmoke Test: Manually insert a document with status: "processing" into Firestore to see if the Python backend picks it up.Grounding Test: Feed the AI a known false claim (e.g., "The moon is made of cheese") to ensure the Red Warning triggers.
