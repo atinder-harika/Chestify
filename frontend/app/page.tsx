@@ -197,6 +197,7 @@ export default function ChestifyApp() {
   const [isAdding, setIsAdding] = useState(false)
   const [chatInput, setChatInput] = useState("")
   const [messages, setMessages] = useState<Array<{ role: "user" | "assistant"; content: string }>>([])
+  const [currentVideoContext, setCurrentVideoContext] = useState<string | null>(null)
   const [isDark, setIsDark] = useState(true)
   const [activeTheme, setActiveTheme] = useState<keyof typeof themes>("fire-ice")
   const [recentActivity, setRecentActivity] = useState<RecentActivity[]>([])
@@ -297,21 +298,65 @@ export default function ChestifyApp() {
     }
   }
 
-  const handleSendMessage = () => {
+  const handleSendMessage = async () => {
     if (!chatInput.trim()) return
-    setMessages([...messages, { role: "user", content: chatInput }])
+    
+    const userMessage = chatInput
+    setMessages([...messages, { role: "user", content: userMessage }])
     setChatInput("")
 
-    // Simulate AI response
-    setTimeout(() => {
+    try {
+      // Call chat API with context if available
+      const response = await fetch("http://localhost:8000/chat", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          message: userMessage,
+          context: currentVideoContext,
+        }),
+      })
+
+      if (!response.ok) throw new Error("Chat API failed")
+
+      const data = await response.json()
+      
       setMessages((prev) => [
         ...prev,
         {
           role: "assistant",
-          content: "I can help you understand the content in your library. What would you like to know?",
+          content: data.response,
         },
       ])
-    }, 1000)
+    } catch (error) {
+      console.error("Chat error:", error)
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content: "Sorry, I encountered an error. Please try again.",
+        },
+      ])
+    }
+  }
+
+  const handleOpenAIAnalysis = (e: React.MouseEvent, item: any) => {
+    e.preventDefault()
+    e.stopPropagation()
+    
+    // Create context string with video details
+    const context = `Title: ${item.title}\nSummary: ${item.summary}\nFact Check: ${item.fact_check?.reason || "N/A"}\nStatus: ${item.status}`
+    setCurrentVideoContext(context)
+    
+    // Add initial assistant message
+    setMessages([{
+      role: "assistant",
+      content: `I've loaded the analysis for "${item.title}". What would you like to know about this video?`
+    }])
+    
+    // Switch to chat tab
+    setActiveTab("chat")
   }
 
   const handleStarterQuestion = (question: string) => {
@@ -649,12 +694,10 @@ export default function ChestifyApp() {
 
               <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
                 {filteredItems.map((item) => (
-                  <a
+                  <div
                     key={item.id}
-                    href={item.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="block"
+                    onClick={() => window.open(item.url, '_blank')}
+                    className="block cursor-pointer"
                   >
                     <DirectionAwareHover
                       imageUrl={item.thumbnail || "/placeholder.svg"}
@@ -750,20 +793,24 @@ export default function ChestifyApp() {
                             )}
                           </div>
 
-                          {/* View AI Analysis Button for misleading content */}
-                          {item.status === "misleading" && (
-                            <Button
-                              size="sm"
-                              className="w-full rounded-full text-xs bg-orange-500/30 text-orange-200 hover:bg-orange-500/40 border border-orange-400/40"
-                            >
-                              View AI Analysis
-                            </Button>
-                          )}
+                          {/* AI Analysis Button for all content */}
+                          <Button
+                            size="sm"
+                            onClick={(e) => handleOpenAIAnalysis(e, item)}
+                            className={cn(
+                              "w-full rounded-full text-xs border",
+                              item.status === "verified"
+                                ? "bg-cyan-500/30 text-cyan-200 hover:bg-cyan-500/40 border-cyan-400/40"
+                                : "bg-orange-500/30 text-orange-200 hover:bg-orange-500/40 border-orange-400/40"
+                            )}
+                          >
+                            AI Analysis
+                          </Button>
                         </div>
                       )}
                     </div>
                   </DirectionAwareHover>
-                  </a>
+                  </div>
                 ))}
               </div>
             </div>
