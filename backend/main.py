@@ -3,6 +3,9 @@ Chestify Backend - FastAPI Server
 Listens to Firestore and processes educational content with AI fact-checking
 """
 
+from dotenv import load_dotenv
+load_dotenv()  # Load .env FIRST before any other imports
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager

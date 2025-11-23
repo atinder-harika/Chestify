@@ -1,23 +1,40 @@
 """
-AI Analysis Service using Google Gemini 1.5 Flash
-Performs summarization, categorization, and fact-checking with grounding
+AI Analysis Service using Google Gemini 2.5 Flash
+Performs summarization, categorization, and fact-checking with Google Search grounding
 """
 
 import os
-import google.generativeai as genai
+import json
+import time
+from google import genai
+from google.genai import types
 from typing import Dict, List
 import logging
-from dotenv import load_dotenv
 
-load_dotenv()
 logger = logging.getLogger(__name__)
 
-# Initialize Gemini
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-if not GEMINI_API_KEY:
-    logger.warning("GEMINI_API_KEY not found in environment variables")
-else:
-    genai.configure(api_key=GEMINI_API_KEY)
+# Initialize Gemini client
+_gemini_client = None
+
+def initialize_gemini():
+    """Initialize Gemini API client with key from environment"""
+    global _gemini_client
+    
+    if _gemini_client:
+        return _gemini_client  # Already initialized
+    
+    # Force reload from .env file
+    from dotenv import load_dotenv
+    load_dotenv(override=True)
+    
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        logger.error("❌ GEMINI_API_KEY not found in environment variables!")
+        raise ValueError("GEMINI_API_KEY not configured")
+    
+    logger.info(f"✅ Gemini API Key loaded: {api_key[:20]}...")
+    _gemini_client = genai.Client(api_key=api_key)
+    return _gemini_client
 
 
 def analyze_content(title: str, transcript: str, url: str) -> Dict:
@@ -33,10 +50,16 @@ def analyze_content(title: str, transcript: str, url: str) -> Dict:
         Dictionary with summary, category, tags, and fact_check
     """
     try:
-        # Configure model with grounding (Google Search)
-        model = genai.GenerativeModel(
-            model_name='gemini-2.0-flash-exp',  # Using Gemini 2.0 Flash (free)
-            tools='google_search_retrieval'  # Enable grounding
+        # Initialize Gemini client on first call
+        client = initialize_gemini()
+        
+        # Configure Google Search grounding tool
+        grounding_tool = types.Tool(
+            google_search=types.GoogleSearch()
+        )
+        
+        config = types.GenerateContentConfig(
+            tools=[grounding_tool]
         )
         
         # Construct prompt
@@ -76,11 +99,29 @@ Return ONLY valid JSON with this structure:
 The urgency_score (1-10) indicates how useful/important this content is for learners.
 """
         
-        # Generate response with grounding
-        response = model.generate_content(prompt)
+        # Generate response with grounding (with retry logic)
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                response = client.models.generate_content(
+                    model="gemini-2.5-flash",
+                    contents=prompt,
+                    config=config
+                )
+                break
+            except Exception as e:
+                if "429" in str(e) or "quota" in str(e).lower():
+                    if attempt < max_retries - 1:
+                        wait_time = (2 ** attempt) * 2  # Exponential backoff: 2s, 4s, 8s
+                        logger.warning(f"⏳ Rate limit hit, retrying in {wait_time}s... (attempt {attempt + 1}/{max_retries})")
+                        time.sleep(wait_time)
+                    else:
+                        logger.error(f"❌ Rate limit exceeded after {max_retries} attempts")
+                        raise
+                else:
+                    raise
         
         # Parse JSON response
-        import json
         result_text = response.text.strip()
         
         # Clean markdown code blocks if present
@@ -92,11 +133,12 @@ The urgency_score (1-10) indicates how useful/important this content is for lear
         
         result = json.loads(result_text)
         
-        logger.info(f"AI analysis completed: {result.get('category')} - {result.get('fact_check', {}).get('status')}")
+        logger.info(f"✅ AI analysis completed: {result.get('category')} - {result.get('fact_check', {}).get('status')}")
         return result
         
     except json.JSONDecodeError as e:
         logger.error(f"Failed to parse AI response as JSON: {str(e)}")
+        logger.error(f"Raw response: {result_text if 'result_text' in locals() else 'N/A'}")
         # Return fallback result
         return get_fallback_analysis(title, transcript)
         

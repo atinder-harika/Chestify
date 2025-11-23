@@ -1,12 +1,16 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { CheckCircle2, AlertTriangle, Loader2, Send, Plus, Package, Moon, Sun, Clock } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { auth, googleProvider, db } from "@/lib/firebase/config"
+import { signInWithPopup, onAuthStateChanged, User } from "firebase/auth"
+import { collection, query, onSnapshot, orderBy } from "firebase/firestore"
+import { addVideoToFirestore } from "@/lib/firestore-helpers"
 
 const mockContentItems = [
   {
@@ -73,6 +77,8 @@ type RecentActivity = {
 }
 
 export default function ChestifyApp() {
+  const [user, setUser] = useState<User | null>(null)
+  const [authLoading, setAuthLoading] = useState(true)
   const [view, setView] = useState<"landing" | "app">("landing")
   const [activeTab, setActiveTab] = useState<TabType>("library")
   const [filter, setFilter] = useState<FilterType>("all")
@@ -86,24 +92,71 @@ export default function ChestifyApp() {
     { url: "https://youtube.com/shorts/marketing-tips", status: "processing", timestamp: "5 hours ago" },
     { url: "https://tiktok.com/@user/video123", status: "failed", timestamp: "1 day ago" },
   ])
+  const [firestoreItems, setFirestoreItems] = useState<any[]>([])
 
-  const handleAddVideo = () => {
-    if (!urlInput.trim()) return
+  // Firebase auth listener
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser)
+      if (currentUser) {
+        setView("app")
+      }
+      setAuthLoading(false)
+    })
+    return () => unsubscribe()
+  }, [])
+
+  // Firestore real-time listener for user's items
+  useEffect(() => {
+    if (!user) {
+      setFirestoreItems([])
+      return
+    }
+
+    const itemsRef = collection(db, `users/${user.uid}/items`)
+    const q = query(itemsRef, orderBy("created_at", "desc"))
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const items: any[] = []
+      snapshot.forEach((doc) => {
+        items.push({ id: doc.id, ...doc.data() })
+      })
+      setFirestoreItems(items)
+    })
+
+    return () => unsubscribe()
+  }, [user])
+
+  const handleSignIn = async () => {
+    try {
+      await signInWithPopup(auth, googleProvider)
+    } catch (error) {
+      console.error("Sign in error:", error)
+    }
+  }
+
+  const handleAddVideo = async () => {
+    if (!urlInput.trim() || !user) return
     setIsAdding(true)
 
-    const newActivity: RecentActivity = {
-      url: urlInput,
-      status: "processing",
-      timestamp: "Just now",
-    }
-    setRecentActivity([newActivity, ...recentActivity.slice(0, 2)])
+    try {
+      await addVideoToFirestore(urlInput)
+      
+      const newActivity: RecentActivity = {
+        url: urlInput,
+        status: "processing",
+        timestamp: "Just now",
+      }
+      setRecentActivity([newActivity, ...recentActivity.slice(0, 2)])
 
-    // Simulate API call
-    setTimeout(() => {
-      setIsAdding(false)
       setUrlInput("")
       setActiveTab("library")
-    }, 1500)
+    } catch (error) {
+      console.error("Error adding video:", error)
+      alert("Failed to add video. Please try again.")
+    } finally {
+      setIsAdding(false)
+    }
   }
 
   const handleSendMessage = () => {
@@ -127,11 +180,31 @@ export default function ChestifyApp() {
     setChatInput(question)
   }
 
-  const filteredItems = mockContentItems.filter((item) => {
+  // Merge Firestore items with mock items for display
+  const allItems = [...firestoreItems, ...mockContentItems]
+  
+  const filteredItems = allItems.filter((item) => {
     if (filter === "all") return true
     if (filter === item.status.toLowerCase()) return true
+    if (filter === "verified" && item.fact_check?.status === "Verified") return true
+    if (filter === "misleading" && (item.fact_check?.status === "False" || item.fact_check?.status === "Questionable")) return true
+    if (filter === "processing" && item.status === "processing") return true
     return false
   })
+
+  // Show loading spinner while checking auth
+  if (authLoading) {
+    return (
+      <div
+        className={cn(
+          "min-h-screen flex items-center justify-center",
+          isDark ? "bg-gradient-to-br from-zinc-900 to-black" : "bg-white",
+        )}
+      >
+        <Loader2 className={cn("h-8 w-8 animate-spin", isDark ? "text-yellow-400" : "text-yellow-500")} />
+      </div>
+    )
+  }
 
   if (view === "landing") {
     return (
@@ -170,7 +243,7 @@ export default function ChestifyApp() {
               Discover, build, and grow with AI-verified education
             </p>
             <Button
-              onClick={() => setView("app")}
+              onClick={handleSignIn}
               className="mt-8 px-12 py-6 text-lg rounded-full bg-gradient-to-r from-yellow-400 to-yellow-200 text-black hover:from-yellow-300 hover:to-yellow-100 font-medium"
             >
               Get In Touch / Sign In

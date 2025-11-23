@@ -6,6 +6,7 @@ Watches for new items with status='processing' and triggers AI pipeline
 import logging
 import threading
 import time
+from datetime import datetime
 from google.cloud.firestore_v1 import FieldFilter
 from config.firebase_config import get_firestore_client
 from services.video_service import extract_video_info, VideoExtractionError
@@ -37,29 +38,41 @@ def listen_to_firestore():
             users_ref = db.collection('users')
             users = users_ref.stream()
             
+            user_count = 0
             for user_doc in users:
                 user_id = user_doc.id
+                user_count += 1
                 
                 # Query items with status='processing'
                 items_ref = db.collection('users').document(user_id).collection('items')
                 query = items_ref.where(filter=FieldFilter('status', '==', 'processing'))
                 
+                items_found = 0
                 for item_doc in query.stream():
+                    items_found += 1
                     item_id = item_doc.id
                     item_data = item_doc.to_dict()
                     
                     # Skip if already processed in this session
                     item_key = f"{user_id}_{item_id}"
                     if item_key in processed_items:
+                        logger.info(f"⏭️ Skipping already processed item: {item_id}")
                         continue
                     
                     logger.info(f"🔍 Found new item: {item_id} for user {user_id}")
+                    logger.info(f"📋 Item data: {item_data.get('url', 'no url')}")
                     
                     # Process the item
                     process_item(user_id, item_id, item_data)
                     
                     # Mark as processed
                     processed_items.add(item_key)
+                
+                if items_found > 0:
+                    logger.info(f"✅ Checked user {user_id}: found {items_found} processing items")
+            
+            if user_count == 0:
+                logger.info("⚠️ No users found in Firestore")
             
             # Poll every 5 seconds
             time.sleep(5)
