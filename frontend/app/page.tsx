@@ -20,6 +20,21 @@ import { signInWithPopup, onAuthStateChanged, User } from "firebase/auth"
 import { collection, query, onSnapshot, orderBy } from "firebase/firestore"
 import { addVideoToFirestore } from "@/lib/firestore-helpers"
 
+// Helper function to format timestamps
+function getTimeAgo(timestamp: string): string {
+  const now = new Date()
+  const past = new Date(timestamp)
+  const diffMs = now.getTime() - past.getTime()
+  const diffMins = Math.floor(diffMs / 60000)
+  const diffHours = Math.floor(diffMs / 3600000)
+  const diffDays = Math.floor(diffMs / 86400000)
+  
+  if (diffMins < 1) return 'Just now'
+  if (diffMins < 60) return `${diffMins} min${diffMins > 1 ? 's' : ''} ago`
+  if (diffHours < 24) return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`
+  return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`
+}
+
 const mockContentItems = [
   {
     id: "101",
@@ -184,11 +199,7 @@ export default function ChestifyApp() {
   const [messages, setMessages] = useState<Array<{ role: "user" | "assistant"; content: string }>>([])
   const [isDark, setIsDark] = useState(true)
   const [activeTheme, setActiveTheme] = useState<keyof typeof themes>("fire-ice")
-  const [recentActivity, setRecentActivity] = useState<RecentActivity[]>([
-    { url: "https://youtube.com/shorts/physics-intro", status: "verified", timestamp: "2 hours ago" },
-    { url: "https://youtube.com/shorts/marketing-tips", status: "processing", timestamp: "5 hours ago" },
-    { url: "https://tiktok.com/@user/video123", status: "failed", timestamp: "1 day ago" },
-  ])
+  const [recentActivity, setRecentActivity] = useState<RecentActivity[]>([])
   const [firestoreItems, setFirestoreItems] = useState<any[]>([])
 
   const currentTheme = themes[activeTheme]
@@ -248,6 +259,14 @@ export default function ChestifyApp() {
         items.push({ id: doc.id, ...doc.data() })
       })
       setFirestoreItems(items)
+      
+      // Update recent activity with latest 3 items
+      const recent = items.slice(0, 3).map((item) => ({
+        url: item.url,
+        status: item.status === 'verified' || item.status === 'misleading' ? item.status : 'processing',
+        timestamp: item.created_at ? getTimeAgo(item.created_at) : 'Just now'
+      }))
+      setRecentActivity(recent)
     })
 
     return () => unsubscribe()
@@ -268,14 +287,6 @@ export default function ChestifyApp() {
 
     try {
       await addVideoToFirestore(urlInput)
-      
-      const newActivity: RecentActivity = {
-        url: urlInput,
-        status: "processing",
-        timestamp: "Just now",
-      }
-      setRecentActivity([newActivity, ...recentActivity.slice(0, 2)])
-
       setUrlInput("")
       setActiveTab("library")
     } catch (error) {
@@ -638,11 +649,17 @@ export default function ChestifyApp() {
 
               <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
                 {filteredItems.map((item) => (
-                  <DirectionAwareHover
+                  <a
                     key={item.id}
-                    imageUrl={item.thumbnail || "/placeholder.svg"}
-                    className={cn(
-                      "w-full aspect-[9/16] border transition-all duration-300",
+                    href={item.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="block"
+                  >
+                    <DirectionAwareHover
+                      imageUrl={item.thumbnail || "/placeholder.svg"}
+                      className={cn(
+                        "w-full aspect-[9/16] border transition-all duration-300",
                       item.status === "verified" &&
                         (isDark
                           ? "border-cyan-500/30 hover:border-cyan-500/60 hover:shadow-[0_20px_50px_-12px_rgba(6,182,212,0.4)]"
@@ -715,11 +732,12 @@ export default function ChestifyApp() {
                               {item.status === "verified" ? "✓ VERIFIED" : "⚠ MISLEADING"}
                             </p>
                             <p className="text-xs text-white/90 mb-2">{item.fact_check.reason}</p>
-                            {item.fact_check.source_link && (
+                            {item.fact_check.source_link ? (
                               <a
                                 href={item.fact_check.source_link}
                                 target="_blank"
                                 rel="noopener noreferrer"
+                                onClick={(e) => e.stopPropagation()}
                                 className={cn(
                                   "text-xs underline block",
                                   item.status === "verified" ? "text-cyan-300 hover:text-cyan-200" : "text-orange-300 hover:text-orange-200",
@@ -727,6 +745,8 @@ export default function ChestifyApp() {
                               >
                                 Source
                               </a>
+                            ) : (
+                              <p className="text-xs text-white/60 italic">Couldn't find sources</p>
                             )}
                           </div>
 
@@ -743,6 +763,7 @@ export default function ChestifyApp() {
                       )}
                     </div>
                   </DirectionAwareHover>
+                  </a>
                 ))}
               </div>
             </div>

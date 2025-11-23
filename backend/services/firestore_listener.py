@@ -122,6 +122,16 @@ def process_item(user_id: str, item_id: str, item_data: dict):
         )
         
         # Step 3: Update Firestore with complete results
+        fact_check_status = ai_result.get('fact_check', {}).get('status', 'Unverified')
+        
+        # Map AI fact_check.status to UI status
+        if fact_check_status == 'Verified':
+            ui_status = 'verified'
+        elif fact_check_status in ['False', 'Questionable']:
+            ui_status = 'misleading'
+        else:
+            ui_status = 'processing'  # Unverified stays as processing
+        
         update_data = {
             'summary': ai_result.get('summary', ''),
             'category': ai_result.get('category', 'Other'),
@@ -132,7 +142,7 @@ def process_item(user_id: str, item_id: str, item_data: dict):
                 'source_link': ''
             }),
             'urgency_score': ai_result.get('urgency_score', 5),
-            'status': 'completed'
+            'status': ui_status
         }
         
         item_ref.update(update_data)
