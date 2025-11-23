@@ -35,60 +35,7 @@ function getTimeAgo(timestamp: string): string {
   return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`
 }
 
-const mockContentItems = [
-  {
-    id: "101",
-    url: "https://youtube.com/shorts/example1",
-    title: "3 Ways to Center a Div",
-    summary: "Explains Flexbox, Grid, and margin:auto methods clearly.",
-    transcript: "First, set display flex...",
-    category: "Web Development",
-    tags: ["CSS", "Frontend", "Coding"],
-    fact_check: {
-      status: "Verified",
-      reason: "Consistent with W3C standards.",
-      source_link:
-        "https://developer.mozilla.org/en-US/docs/Web/CSS/CSS_Flexible_Box_Layout/Aligning_Items_in_a_Flex_Container",
-    },
-    status: "verified" as const,
-    created_at: "2023-10-27T10:00:00Z",
-    thumbnail: "/coding-tutorial.png",
-  },
-  {
-    id: "102",
-    url: "https://youtube.com/shorts/example2",
-    title: "Alkaline Water Cures Everything?",
-    summary: "Claims that changing body pH prevents all disease.",
-    transcript: "Cancer cannot survive in an alkaline environment...",
-    category: "Health",
-    tags: ["Diet", "Wellness", "Debunked"],
-    fact_check: {
-      status: "False",
-      reason: "The human body maintains a strictly regulated pH. Diet cannot significantly change blood pH.",
-      source_link: "https://www.cancer.org/cancer/survivorship/coping/nutrition/benefits.html",
-    },
-    status: "misleading" as const,
-    created_at: "2023-10-27T11:30:00Z",
-    thumbnail: "/lemon-health.jpg",
-  },
-  {
-    id: "103",
-    url: "https://youtube.com/shorts/example3",
-    title: "Quantum Physics Explained",
-    summary: "Processing transcript...",
-    transcript: "",
-    category: "Physics",
-    tags: [],
-    fact_check: {
-      status: "Unverified",
-      reason: "Pending analysis...",
-      source_link: "",
-    },
-    status: "processing" as const,
-    created_at: "2023-10-27T12:00:00Z",
-    thumbnail: "/quantum-physics-abstract.png",
-  },
-]
+// Mock items removed - using only real Firestore data
 
 type TabType = "library" | "add" | "chat"
 type FilterType = "all" | "verified" | "misleading" | "processing"
@@ -363,8 +310,8 @@ export default function ChestifyApp() {
     setChatInput(question)
   }
 
-  // Merge Firestore items with mock items for display
-  const allItems = [...firestoreItems, ...mockContentItems]
+  // Use only real Firestore items
+  const allItems = firestoreItems
   
   const filteredItems = allItems.filter((item) => {
     if (filter === "all") return true
