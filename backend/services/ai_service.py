@@ -53,14 +53,8 @@ def analyze_content(title: str, transcript: str, url: str) -> Dict:
         # Initialize Gemini client on first call
         client = initialize_gemini()
         
-        # Configure Google Search grounding tool
-        grounding_tool = types.Tool(
-            google_search=types.GoogleSearch()
-        )
-        
-        config = types.GenerateContentConfig(
-            tools=[grounding_tool]
-        )
+        # Grounding is deferred until a project with Search quota is configured.
+        config = types.GenerateContentConfig()
         
         # Construct prompt
         prompt = f"""
@@ -75,13 +69,14 @@ URL: {url}
 1. Generate a concise summary (2-3 sentences)
 2. Categorize into ONE of: Physics, Chemistry, Biology, Math, Computer Science, History, Psychology, Health, Web Development, Business, or Other
 3. Extract 3-5 relevant tags
-4. CRITICAL: Fact-check the claims using Google Search. Determine if the content is:
+4. Do not claim that the content was externally fact-checked. Without Search
+   grounding, mark the fact check as "Unverified".
    - "Verified": Accurate and supported by reliable sources
    - "Questionable": Contains some inaccuracies or lacks sources
    - "False": Contains misinformation or pseudoscience
    - "Unverified": Cannot confirm accuracy
 
-**IMPORTANT:** For health claims, pseudoscience (like "alkaline water cures cancer"), or conspiracy theories, you MUST mark as "False" or "Questionable" and provide a corrective explanation with a source link.
+**IMPORTANT:** Do not invent source links or present uncertain claims as verified.
 
 Return ONLY valid JSON with this structure:
 {{
@@ -99,12 +94,12 @@ Return ONLY valid JSON with this structure:
 The urgency_score (1-10) indicates how useful/important this content is for learners.
 """
         
-        # Generate response with grounding (with retry logic)
+        # Generate response with retry logic.
         max_retries = 3
         for attempt in range(max_retries):
             try:
                 response = client.models.generate_content(
-                    model="gemini-2.5-flash",
+                    model="gemini-3.1-flash-lite",
                     contents=prompt,
                     config=config
                 )

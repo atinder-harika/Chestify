@@ -83,9 +83,58 @@ Frontend runs at `http://localhost:3000`
 
 ### 4. Verify Setup
 1. Open `http://localhost:3000`
-2. Sign in with Google
-3. Add a YouTube Shorts or TikTok URL
-4. Backend should process it and display fact-check results
+2. Open the public demo
+3. Add a YouTube or YouTube Shorts URL
+4. Backend should process it and display an unverified AI analysis
+
+## Deployment
+
+### GitHub Pages frontend
+
+The frontend is configured as a static export. Enable **Settings → Pages →
+Source: GitHub Actions** in the repository. Add these repository variables under
+**Settings → Secrets and variables → Actions → Variables**:
+
+```text
+NEXT_PUBLIC_FIREBASE_API_KEY
+NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN
+NEXT_PUBLIC_FIREBASE_PROJECT_ID
+NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET
+NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID
+NEXT_PUBLIC_FIREBASE_APP_ID
+NEXT_PUBLIC_API_URL
+```
+
+`NEXT_PUBLIC_API_URL` is the public Railway URL, without a trailing slash.
+Pushing to `master` builds and deploys `frontend/out`.
+
+### Railway backend
+
+Create a Railway service from this repository and set its root directory to
+`backend`. Railway will use `backend/Dockerfile`. Add:
+
+```text
+GEMINI_API_KEY
+FIREBASE_CREDENTIALS_JSON
+ENVIRONMENT=production
+```
+
+`FIREBASE_CREDENTIALS_JSON` is the complete Firebase service-account JSON
+stored as a Railway secret. Do not commit it.
+
+### Firestore demo rules
+
+The initial milestone intentionally uses a shared public collection. Review and
+deploy [firestore.rules](./firestore.rules) in the Firebase console. These
+rules must be replaced with authenticated per-user rules before private data is
+supported.
+
+### Cloudflare
+
+After GitHub Pages is live, add the custom domain `chestify.atinder.dev` in
+GitHub Pages. Then create the DNS record in Cloudflare using the target shown
+by GitHub. Keep proxying disabled until GitHub reports the custom domain as
+verified, then enable proxying if desired.
 
 ## 🔑 API Keys Required
 
