@@ -69,5 +69,6 @@ backend/
 1. Connect GitHub repository to Railway
 2. Add environment variables:
    - `GEMINI_API_KEY`
-   - `FIREBASE_CREDENTIALS` (paste JSON content)
+   - `FIREBASE_CREDENTIALS_JSON` (complete service-account JSON)
+   - `ENVIRONMENT=production`
 3. Railway will auto-deploy on push

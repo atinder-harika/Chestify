@@ -3,6 +3,7 @@ Firebase Admin SDK Configuration
 """
 
 import os
+import json
 import firebase_admin
 from firebase_admin import credentials, firestore
 from dotenv import load_dotenv
@@ -21,17 +22,21 @@ def initialize_firebase():
     global db
     
     try:
-        # Get credentials path from environment
-        creds_path = os.getenv("FIREBASE_CREDENTIALS", "keys/service-account.json")
-        
-        if not os.path.exists(creds_path):
-            raise FileNotFoundError(
-                f"Firebase credentials not found at {creds_path}. "
-                "Please add your service-account.json file."
-            )
-        
-        # Initialize Firebase Admin
-        cred = credentials.Certificate(creds_path)
+        credentials_json = os.getenv("FIREBASE_CREDENTIALS_JSON")
+        if credentials_json:
+            try:
+                cred = credentials.Certificate(json.loads(credentials_json))
+            except json.JSONDecodeError as exc:
+                raise ValueError("FIREBASE_CREDENTIALS_JSON is not valid JSON") from exc
+        else:
+            creds_path = os.getenv("FIREBASE_CREDENTIALS", "keys/service-account.json")
+            if not os.path.exists(creds_path):
+                raise FileNotFoundError(
+                    f"Firebase credentials not found at {creds_path}. "
+                    "Set FIREBASE_CREDENTIALS_JSON or add service-account.json."
+                )
+            cred = credentials.Certificate(creds_path)
+
         firebase_admin.initialize_app(cred)
         
         # Get Firestore client

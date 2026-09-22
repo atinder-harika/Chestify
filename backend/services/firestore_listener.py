@@ -34,7 +34,22 @@ def listen_to_firestore():
     
     while True:
         try:
-            # Query all users' collections for processing items
+            # Process the shared demo collection first.
+            demo_items_ref = db.collection('demo_items')
+            demo_query = demo_items_ref.where(
+                filter=FieldFilter('status', '==', 'processing')
+            )
+            for item_doc in demo_query.stream():
+                item_id = item_doc.id
+                item_key = f"demo_{item_id}"
+                if item_key in processed_items:
+                    continue
+                item_data = item_doc.to_dict()
+                logger.info(f"Found demo item: {item_id}")
+                process_item(demo_items_ref.document(item_id), item_id, item_data)
+                processed_items.add(item_key)
+
+            # Query existing user collections for backward compatibility.
             users_ref = db.collection('users')
             users = users_ref.stream()
             
@@ -63,7 +78,7 @@ def listen_to_firestore():
                     logger.info(f"📋 Item data: {item_data.get('url', 'no url')}")
                     
                     # Process the item
-                    process_item(user_id, item_id, item_data)
+                    process_item(items_ref.document(item_id), item_id, item_data)
                     
                     # Mark as processed
                     processed_items.add(item_key)
@@ -82,7 +97,7 @@ def listen_to_firestore():
             time.sleep(10)  # Wait longer on error
 
 
-def process_item(user_id: str, item_id: str, item_data: dict):
+def process_item(item_ref, item_id: str, item_data: dict):
     """
     Process a single item through the AI pipeline
     
@@ -91,9 +106,6 @@ def process_item(user_id: str, item_id: str, item_data: dict):
         item_id: Item document ID
         item_data: Current item data
     """
-    db = get_firestore_client()
-    item_ref = db.collection('users').document(user_id).collection('items').document(item_id)
-    
     try:
         url = item_data.get('url')
         
@@ -130,7 +142,7 @@ def process_item(user_id: str, item_id: str, item_data: dict):
         elif fact_check_status in ['False', 'Questionable']:
             ui_status = 'misleading'
         else:
-            ui_status = 'processing'  # Unverified stays as processing
+            ui_status = 'unverified'
         
         update_data = {
             'summary': ai_result.get('summary', ''),
@@ -142,7 +154,8 @@ def process_item(user_id: str, item_id: str, item_data: dict):
                 'source_link': ''
             }),
             'urgency_score': ai_result.get('urgency_score', 5),
-            'status': ui_status
+            'status': ui_status,
+            'error_message': ''
         }
         
         item_ref.update(update_data)

@@ -6,17 +6,15 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { DirectionAwareHover } from "@/components/direction-aware-hover"
-import { CheckCircle2, AlertTriangle, Loader2, Send, Plus, Package, Moon, Sun, Clock, Palette } from "lucide-react"
+import { CheckCircle2, AlertTriangle, Loader2, Send, Plus, Package, Moon, Sun, Clock, Palette, XCircle } from "lucide-react"
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { UserProfileDropdown } from "@/components/user-profile-dropdown"
 import { cn } from "@/lib/utils"
-import { auth, googleProvider, db } from "@/lib/firebase/config"
-import { signInWithPopup, onAuthStateChanged, User } from "firebase/auth"
+import { db } from "@/lib/firebase/config"
 import { collection, query, onSnapshot, orderBy } from "firebase/firestore"
 import { addVideoToFirestore } from "@/lib/firestore-helpers"
 
@@ -143,10 +141,7 @@ const themes = {
 }
 
 export default function ChestifyApp() {
-  const [user, setUser] = useState<User | null>(null)
-  const [authLoading, setAuthLoading] = useState(true)
   const [view, setView] = useState<"landing" | "app">("landing")
-  const [manualSignOut, setManualSignOut] = useState(false)
   const [activeTab, setActiveTab] = useState<TabType>("library")
   const [filter, setFilter] = useState<FilterType>("all")
   const [urlInput, setUrlInput] = useState("")
@@ -186,28 +181,9 @@ export default function ChestifyApp() {
     }
   }, [activeTheme])
 
-  // Firebase auth listener
+  // Firestore real-time listener for the shared demo chest.
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser)
-      if (currentUser && !manualSignOut) {
-        setView("app")
-      } else if (!currentUser) {
-        setView("landing")
-      }
-      setAuthLoading(false)
-    })
-    return () => unsubscribe()
-  }, [manualSignOut])
-
-  // Firestore real-time listener for user's items
-  useEffect(() => {
-    if (!user) {
-      setFirestoreItems([])
-      return
-    }
-
-    const itemsRef = collection(db, `users/${user.uid}/items`)
+    const itemsRef = collection(db, "demo_items")
     const q = query(itemsRef, orderBy("created_at", "desc"))
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -227,19 +203,10 @@ export default function ChestifyApp() {
     })
 
     return () => unsubscribe()
-  }, [user])
-
-  const handleSignIn = async () => {
-    try {
-      setManualSignOut(false)
-      await signInWithPopup(auth, googleProvider)
-    } catch (error) {
-      console.error("Sign in error:", error)
-    }
-  }
+  }, [])
 
   const handleAddVideo = async () => {
-    if (!urlInput.trim() || !user) return
+    if (!urlInput.trim()) return
     setIsAdding(true)
 
     try {
@@ -263,7 +230,8 @@ export default function ChestifyApp() {
 
     try {
       // Call chat API with context if available
-      const response = await fetch("http://localhost:8000/chat", {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+      const response = await fetch(`${apiUrl}/chat`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -330,20 +298,6 @@ export default function ChestifyApp() {
     if (filter === "processing" && item.status === "processing") return true
     return false
   })
-
-  // Show loading spinner while checking auth
-  if (authLoading) {
-    return (
-      <div
-        className={cn(
-          "min-h-screen flex items-center justify-center",
-          isDark ? "bg-gradient-to-br from-zinc-900 to-black" : "bg-white",
-        )}
-      >
-        <Loader2 className={cn("h-8 w-8 animate-spin", isDark ? "text-yellow-400" : "text-yellow-500")} />
-      </div>
-    )
-  }
 
   if (view === "landing") {
     return (
@@ -434,7 +388,7 @@ export default function ChestifyApp() {
               Discover, build, and grow with AI-verified education
             </p>
             <Button
-              onClick={handleSignIn}
+              onClick={() => setView("app")}
               className={cn(
                 "mt-8 px-12 py-6 text-lg rounded-full bg-gradient-to-r font-medium transition-all",
                 `${currentTheme.buttonGradient}`,
@@ -442,7 +396,7 @@ export default function ChestifyApp() {
                 currentTheme.buttonShadow || "",
               )}
             >
-              Get In Touch / Sign In
+              Open Public Demo
             </Button>
           </div>
         </div>
@@ -530,24 +484,6 @@ export default function ChestifyApp() {
                   {isDark ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
                 </Button>
 
-                {/* User Profile Dropdown */}
-                {user && (
-                  <UserProfileDropdown
-                    isDark={isDark}
-                    onSignOut={async () => {
-                      setManualSignOut(true)
-                      await auth.signOut()
-                      setView("landing")
-                    }}
-                    user={{
-                      displayName: user.displayName || "User",
-                      email: user.email || "",
-                      photoURL: user.photoURL || "",
-                      initials: (user.displayName || "U").substring(0, 2).toUpperCase(),
-                    }}
-                    currentTheme={currentTheme}
-                  />
-                )}
               </div>
             </div>
           </div>
@@ -682,7 +618,9 @@ export default function ChestifyApp() {
                       <div>
                         {item.status === "verified" && <CheckCircle2 className="w-5 h-5 text-cyan-400" />}
                         {item.status === "misleading" && <AlertTriangle className="w-5 h-5 text-orange-400" />}
+                        {item.status === "unverified" && <AlertTriangle className="w-5 h-5 text-yellow-400" />}
                         {item.status === "processing" && <Loader2 className="w-5 h-5 animate-spin text-purple-400" />}
+                        {item.status === "error" && <XCircle className="w-5 h-5 text-red-400" />}
                       </div>
                     </div>
 
@@ -710,6 +648,21 @@ export default function ChestifyApp() {
                         <div className="space-y-2">
                           <div className="h-3 rounded animate-pulse bg-white/20" />
                           <div className="h-3 rounded animate-pulse w-3/4 bg-white/20" />
+                        </div>
+                      ) : item.status === "error" ? (
+                        <div className="space-y-2">
+                          <p className="text-sm font-semibold text-red-300">Analysis unavailable</p>
+                          <p className="text-xs text-white/80">
+                            {item.error_message || item.fact_check?.reason || "Please try again later."}
+                          </p>
+                        </div>
+                      ) : item.status === "unverified" ? (
+                        <div className="space-y-3">
+                          <div className="p-3 rounded-lg border bg-yellow-500/20 border-yellow-400/40">
+                            <p className="text-xs font-semibold text-yellow-300 mb-1">? UNVERIFIED</p>
+                            <p className="text-xs text-white/90">{item.fact_check?.reason || "No external sources were checked."}</p>
+                          </div>
+                          <p className="text-sm text-white/80">{item.summary}</p>
                         </div>
                       ) : (
                         <div className="space-y-3">
