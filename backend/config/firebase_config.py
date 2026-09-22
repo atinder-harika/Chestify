@@ -30,6 +30,11 @@ def initialize_firebase():
                 raise ValueError("FIREBASE_CREDENTIALS_JSON is not valid JSON") from exc
         else:
             creds_path = os.getenv("FIREBASE_CREDENTIALS", "keys/service-account.json")
+            if creds_path.lstrip().startswith("{"):
+                raise ValueError(
+                    "FIREBASE_CREDENTIALS contains JSON. Move the complete service-account "
+                    "JSON to FIREBASE_CREDENTIALS_JSON."
+                )
             if not os.path.exists(creds_path):
                 raise FileNotFoundError(
                     f"Firebase credentials not found at {creds_path}. "
