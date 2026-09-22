@@ -122,6 +122,11 @@ ENVIRONMENT=production
 `FIREBASE_CREDENTIALS_JSON` is the complete Firebase service-account JSON
 stored as a Railway secret. Do not commit it.
 
+Railway supplies the `PORT` variable automatically. The container listens on
+that value; do not hardcode the public port to `8000`. If Railway asks for an
+exposed/target port, use the value shown in the deployment logs (currently
+`8080`) or remove the manual override.
+
 ### Firestore demo rules
 
 The initial milestone intentionally uses a shared public collection. Review and
