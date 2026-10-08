@@ -11,6 +11,7 @@ frontend/.env.local
 frontend/.vercel
 
 # --- Backend (Python/FastAPI) ---
+.venv
 backend/__pycache__
 backend/venv
 backend/.venv

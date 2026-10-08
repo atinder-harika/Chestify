@@ -1,4 +1,4 @@
-# Chestify: Simple System Design for Launch
+﻿# Chestify: Simple System Design for Launch
 
 ## 1. Purpose
 
