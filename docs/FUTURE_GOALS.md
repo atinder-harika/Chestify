@@ -11,6 +11,9 @@ These items are intentionally deferred while restoring the public demo.
 - Re-enable Google Search grounding after configuring a project with grounding quota/billing; do not present ungrounded analysis as fact-checked.
 - Add TikTok, Instagram, and X support.
 - Improve transcript extraction when captions are unavailable.
+- Improve hosted video extraction reliability by handling platform bot checks,
+  authentication/cookie requirements, rate limits, and provider-specific
+  fallbacks without exposing user credentials.
 - Evaluate Gemini against curated true/false claims.
 - Validate structured AI output and improve source-quality checks.
 - Add a review path for uncertain or high-impact health claims.
