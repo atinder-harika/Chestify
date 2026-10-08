@@ -8,7 +8,7 @@ import json
 import time
 from google import genai
 from google.genai import types
-from typing import Dict, List
+from typing import Any, Dict, List
 import logging
 
 logger = logging.getLogger(__name__)
@@ -32,9 +32,29 @@ def initialize_gemini():
         logger.error("❌ GEMINI_API_KEY not found in environment variables!")
         raise ValueError("GEMINI_API_KEY not configured")
     
-    logger.info(f"✅ Gemini API Key loaded: {api_key[:20]}...")
+    logger.info("Gemini API key loaded")
     _gemini_client = genai.Client(api_key=api_key)
     return _gemini_client
+
+
+def extract_grounding_sources(response: Any) -> List[Dict[str, str]]:
+    """Return unique web sources supplied by Gemini Search grounding."""
+    sources: List[Dict[str, str]] = []
+    seen_urls = set()
+
+    for candidate in getattr(response, "candidates", []) or []:
+        metadata = getattr(candidate, "grounding_metadata", None)
+        for chunk in getattr(metadata, "grounding_chunks", []) or []:
+            web = getattr(chunk, "web", None)
+            url = getattr(web, "uri", None)
+            if url and url not in seen_urls:
+                sources.append({
+                    "title": getattr(web, "title", None) or url,
+                    "url": url,
+                })
+                seen_urls.add(url)
+
+    return sources
 
 
 def analyze_content(title: str, transcript: str, url: str) -> Dict:
@@ -127,6 +147,11 @@ The urgency_score (1-10) indicates how useful/important this content is for lear
             result_text = result_text.strip()
         
         result = json.loads(result_text)
+        sources = extract_grounding_sources(response)
+        fact_check = result.setdefault("fact_check", {})
+        if sources and not fact_check.get("source_link"):
+            fact_check["source_link"] = sources[0]["url"]
+        result["sources"] = sources
         
         logger.info(f"✅ AI analysis completed: {result.get('category')} - {result.get('fact_check', {}).get('status')}")
         return result
@@ -162,6 +187,7 @@ def get_fallback_analysis(title: str, transcript: str) -> Dict:
             "reason": "Unable to verify content at this time. Please review manually.",
             "source_link": ""
         },
+        "sources": [],
         "urgency_score": 5
     }
 

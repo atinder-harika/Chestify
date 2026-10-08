@@ -12,7 +12,7 @@ from contextlib import asynccontextmanager
 from pydantic import BaseModel
 import logging
 from config.firebase_config import initialize_firebase
-from services.firestore_listener import start_firestore_listener
+from services import firestore_listener
 from services.ai_service import initialize_gemini
 import uvicorn
 
@@ -34,7 +34,7 @@ async def lifespan(app: FastAPI):
     logger.info("✅ Firebase initialized")
     
     # Start Firestore listener
-    start_firestore_listener()
+    firestore_listener.start_firestore_listener()
     logger.info("✅ Firestore listener started")
     
     yield
@@ -75,10 +75,11 @@ def read_root():
 @app.get("/health")
 def health_check():
     """Detailed health check"""
+    listener = firestore_listener.listener_status
     return {
-        "status": "healthy",
+        "status": "healthy" if listener == "active" else "degraded",
         "firebase": "connected",
-        "listener": "active"
+        "listener": listener
     }
 
 
