@@ -14,9 +14,11 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { cn } from "@/lib/utils"
-import { db } from "@/lib/firebase/config"
+import { auth, db, googleProvider } from "@/lib/firebase/config"
 import { collection, query, onSnapshot, orderBy } from "firebase/firestore"
+import { onAuthStateChanged, signInWithPopup, signOut, type User } from "firebase/auth"
 import { addVideoToFirestore } from "@/lib/firestore-helpers"
+import { UserProfileDropdown } from "@/components/user-profile-dropdown"
 
 // Helper function to format timestamps
 function formatShortDate(timestamp: any): string {
@@ -153,6 +155,9 @@ export default function ChestifyApp() {
   const [activeTheme, setActiveTheme] = useState<keyof typeof themes>("fire-ice")
   const [recentActivity, setRecentActivity] = useState<RecentActivity[]>([])
   const [firestoreItems, setFirestoreItems] = useState<any[]>([])
+  const [user, setUser] = useState<User | null>(null)
+  const [authLoading, setAuthLoading] = useState(true)
+  const [authError, setAuthError] = useState<string | null>(null)
 
   const currentTheme = themes[activeTheme]
 
@@ -181,9 +186,23 @@ export default function ChestifyApp() {
     }
   }, [activeTheme])
 
-  // Firestore real-time listener for the shared demo chest.
   useEffect(() => {
-    const itemsRef = collection(db, "demo_items")
+    return onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser)
+      setAuthLoading(false)
+      if (currentUser) {
+        setView("app")
+      }
+    })
+  }, [])
+
+  useEffect(() => {
+    if (!user) {
+      setFirestoreItems([])
+      return
+    }
+
+    const itemsRef = collection(db, "users", user.uid, "items")
     const q = query(itemsRef, orderBy("created_at", "desc"))
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -203,7 +222,42 @@ export default function ChestifyApp() {
     })
 
     return () => unsubscribe()
-  }, [])
+  }, [user])
+
+  const handleSignIn = async () => {
+    setAuthError(null)
+    try {
+      await signInWithPopup(auth, googleProvider)
+    } catch (error) {
+      console.error("Google sign-in failed:", error)
+      setAuthError("Google sign-in failed. Please try again.")
+    }
+  }
+
+  const handleSignOut = async () => {
+    try {
+      await signOut(auth)
+      setView("landing")
+      setActiveTab("library")
+    } catch (error) {
+      console.error("Sign-out failed:", error)
+      setAuthError("Sign-out failed. Please try again.")
+    }
+  }
+
+  const userData = user
+    ? {
+        displayName: user.displayName || "Chestify user",
+        email: user.email || "",
+        photoURL: user.photoURL || "",
+        initials: (user.displayName || user.email || "C")
+          .split(/\s+/)
+          .map((part) => part[0])
+          .join("")
+          .slice(0, 2)
+          .toUpperCase(),
+      }
+    : null
 
   const handleAddVideo = async () => {
     if (!urlInput.trim()) return
@@ -299,7 +353,15 @@ export default function ChestifyApp() {
     return false
   })
 
-  if (view === "landing") {
+  if (authLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-black text-white">
+        <Loader2 className="w-8 h-8 animate-spin" aria-label="Loading authentication" />
+      </div>
+    )
+  }
+
+  if (view === "landing" || !user) {
     return (
       <div
         className={cn(
@@ -387,8 +449,13 @@ export default function ChestifyApp() {
             <p className={cn("text-xl md:text-2xl font-light", isDark ? "text-white/70" : "text-neutral-600")}>
               Discover, build, and grow with AI-verified education
             </p>
+            {authError && (
+              <p className="text-sm text-red-400" role="alert">
+                {authError}
+              </p>
+            )}
             <Button
-              onClick={() => setView("app")}
+              onClick={handleSignIn}
               className={cn(
                 "mt-8 px-12 py-6 text-lg rounded-full bg-gradient-to-r font-medium transition-all",
                 `${currentTheme.buttonGradient}`,
@@ -396,7 +463,7 @@ export default function ChestifyApp() {
                 currentTheme.buttonShadow || "",
               )}
             >
-              Open Public Demo
+              Sign in with Google
             </Button>
           </div>
         </div>
@@ -437,6 +504,14 @@ export default function ChestifyApp() {
                 </h1>
               </div>
               <div className="flex items-center gap-4">
+                {userData && (
+                  <UserProfileDropdown
+                    isDark={isDark}
+                    onSignOut={handleSignOut}
+                    user={userData}
+                    currentTheme={currentTheme}
+                  />
+                )}
                 {/* Theme Color Picker */}
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>

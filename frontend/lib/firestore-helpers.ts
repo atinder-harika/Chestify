@@ -1,11 +1,16 @@
-import { db } from './firebase/config'
+import { auth, db } from './firebase/config'
 import { collection, addDoc, Timestamp } from 'firebase/firestore'
 
 export async function addVideoToFirestore(url: string) {
   console.log('📝 Adding video:', url)
 
-  const itemsRef = collection(db, 'demo_items')
-  console.log('📂 Collection path: demo_items')
+  const user = auth.currentUser
+  if (!user) {
+    throw new Error('You must be signed in to add a video.')
+  }
+
+  const itemsRef = collection(db, 'users', user.uid, 'items')
+  console.log('📂 Collection path:', `users/${user.uid}/items`)
   
   try {
     const docRef = await addDoc(itemsRef, {
