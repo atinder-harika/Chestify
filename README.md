@@ -5,6 +5,7 @@ AI-powered educational content verification platform that fact-checks short-form
 ## 📁 Structure
 * **/frontend**: Next.js 14 App with TypeScript, Tailwind CSS, Radix UI
 * **/backend**: FastAPI Python server with Gemini AI integration
+* **/docs**: Architecture, backend, frontend, and future-goal documentation
 
 ## 🚀 Local Deployment Guide
 
@@ -13,6 +14,10 @@ AI-powered educational content verification platform that fact-checks short-form
 - Python 3.9+
 - Firebase project with Firestore enabled
 - Google Gemini API key
+
+Before running the frontend, open Firebase Console → Authentication →
+Sign-in method, enable the Google provider, and add your local and deployed
+frontend domains under authorized domains.
 
 ### 1. Clone Repository
 ```bash
@@ -83,7 +88,7 @@ Frontend runs at `http://localhost:3000`
 
 ### 4. Verify Setup
 1. Open `http://localhost:3000`
-2. Open the public demo
+2. Sign in with your Google account
 3. Add a YouTube or YouTube Shorts URL
 4. Backend should process it and display an unverified AI analysis
 
@@ -127,12 +132,11 @@ that value; do not hardcode the public port to `8000`. If Railway asks for an
 exposed/target port, use the value shown in the deployment logs (currently
 `8080`) or remove the manual override.
 
-### Firestore demo rules
+### Firestore rules
 
-The initial milestone intentionally uses a shared public collection. Review and
-deploy [firestore.rules](./firestore.rules) in the Firebase console. These
-rules must be replaced with authenticated per-user rules before private data is
-supported.
+Review and deploy [firestore.rules](./firestore.rules) in the Firebase console.
+Users must sign in with Google, and each user’s items are stored under their
+authenticated `users/{uid}/items` collection.
 
 ### Cloudflare
 
@@ -151,6 +155,13 @@ verified, then enable proxying if desired.
 - Create project: https://console.firebase.google.com/
 - Enable: Authentication (Google Sign-In), Firestore Database
 - Used for: User auth, real-time data storage
+
+## Documentation
+
+- [System design](./docs/SYSTEM_DESIGN.md)
+- [Backend guide](./docs/BACKEND.md)
+- [Frontend guide](./docs/FRONTEND.md)
+- [Future goals](./docs/FUTURE_GOALS.md)
 
 ## 📦 Tech Stack
 - **Frontend**: Next.js 14, TypeScript, Tailwind CSS, Radix UI, Framer Motion
