@@ -2,12 +2,12 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Temporary public demo access. Replace with authenticated per-user rules
-    // before using Chestify for private or production data.
-    match /demo_items/{itemId} {
-      allow read, create: if true;
-      allow update: if true;
-      allow delete: if false;
+    match /users/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+
+      match /items/{itemId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
     }
   }
 }
