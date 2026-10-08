@@ -38,11 +38,12 @@ Server will run at: `http://localhost:8000`
 
 ## How It Works
 
-1. **Firestore Listener**: Polls for items with `status='processing'`
+1. **Firestore Listener**: Uses a collection-group listener for items with
+   `status='processing'` without repeatedly scanning every user
 2. **Video Extraction**: Uses yt-dlp to extract metadata and transcripts
-3. **AI Analysis**: Gemini 1.5 Flash analyzes content with Google Search grounding
-4. **Fact-Checking**: Automatically detects misinformation
-5. **Update Firestore**: Sets `status='completed'` with results
+3. **AI Analysis**: Gemini 2.5 Flash analyzes content with Google Search grounding
+4. **Fact-Checking**: Automatically detects misinformation and stores sources
+5. **Update Firestore**: Stores the analysis and updates the item status
 
 ## API Endpoints
 

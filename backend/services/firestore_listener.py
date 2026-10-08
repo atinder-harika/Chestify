@@ -5,8 +5,6 @@ Watches for new items with status='processing' and triggers AI pipeline
 
 import logging
 import threading
-import time
-from datetime import datetime
 from google.cloud.firestore_v1 import FieldFilter
 from config.firebase_config import get_firestore_client
 from services.video_service import extract_video_info, VideoExtractionError
@@ -16,10 +14,13 @@ logger = logging.getLogger(__name__)
 
 # Track processed items to avoid duplicates
 processed_items = set()
+listener_status = "inactive"
 
 
 def start_firestore_listener():
     """Start background thread to listen for new items"""
+    global listener_status
+    listener_status = "starting"
     thread = threading.Thread(target=listen_to_firestore, daemon=True)
     thread.start()
     logger.info("Firestore listener thread started")
@@ -27,74 +28,71 @@ def start_firestore_listener():
 
 def listen_to_firestore():
     """
-    Main listener loop - polls Firestore for items with status='processing'
-    Note: Using polling instead of snapshot listeners for simplicity with Railway
-    """
-    db = get_firestore_client()
-    
-    while True:
-        try:
-            # Process the shared demo collection first.
-            demo_items_ref = db.collection('demo_items')
-            demo_query = demo_items_ref.where(
-                filter=FieldFilter('status', '==', 'processing')
-            )
-            for item_doc in demo_query.stream():
-                item_id = item_doc.id
-                item_key = f"demo_{item_id}"
-                if item_key in processed_items:
-                    continue
-                item_data = item_doc.to_dict()
-                logger.info(f"Found demo item: {item_id}")
-                process_item(demo_items_ref.document(item_id), item_id, item_data)
-                processed_items.add(item_key)
+    Listen for processing items across all users.
 
-            # Query existing user collections for backward compatibility.
-            users_ref = db.collection('users')
-            users = users_ref.stream()
-            
-            user_count = 0
-            for user_doc in users:
-                user_id = user_doc.id
-                user_count += 1
-                
-                # Query items with status='processing'
-                items_ref = db.collection('users').document(user_id).collection('items')
-                query = items_ref.where(filter=FieldFilter('status', '==', 'processing'))
-                
-                items_found = 0
-                for item_doc in query.stream():
-                    items_found += 1
-                    item_id = item_doc.id
-                    item_data = item_doc.to_dict()
-                    
-                    # Skip if already processed in this session
-                    item_key = f"{user_id}_{item_id}"
-                    if item_key in processed_items:
-                        logger.info(f"⏭️ Skipping already processed item: {item_id}")
-                        continue
-                    
-                    logger.info(f"🔍 Found new item: {item_id} for user {user_id}")
-                    logger.info(f"📋 Item data: {item_data.get('url', 'no url')}")
-                    
-                    # Process the item
-                    process_item(items_ref.document(item_id), item_id, item_data)
-                    
-                    # Mark as processed
-                    processed_items.add(item_key)
-                
-                if items_found > 0:
-                    logger.info(f"✅ Checked user {user_id}: found {items_found} processing items")
-            
-            if user_count == 0:
-                logger.info("⚠️ No users found in Firestore")
-            
-            # Poll every 5 seconds
-            time.sleep(5)
-            
-        except Exception as e:
-            logger.error(f"Error in Firestore listener: {str(e)}")
-            time.sleep(10)  # Wait longer on error
+    A collection-group listener avoids repeatedly reading every user and every
+    item on a fixed polling interval.
+    """
+    global listener_status
+
+    try:
+        db = get_firestore_client()
+        items_query = db.collection_group('items').where(
+            filter=FieldFilter('status', '==', 'processing')
+        )
+        demo_query = db.collection('demo_items').where(
+            filter=FieldFilter('status', '==', 'processing')
+        )
+        items_query.on_snapshot(on_processing_snapshot)
+        demo_query.on_snapshot(on_demo_snapshot)
+        listener_status = "active"
+        logger.info("Firestore processing listeners registered")
+
+        # Keep this daemon thread alive while the Firestore SDK owns the listener.
+        threading.Event().wait()
+    except Exception:
+        listener_status = "error"
+        logger.exception("Firestore listener stopped unexpectedly")
+
+
+def on_processing_snapshot(col_snapshot, changes, read_time):
+    """Process newly added or changed documents requiring analysis."""
+    for change in changes:
+        item_doc = change.document
+        item_data = item_doc.to_dict()
+        if item_data.get('status') != 'processing':
+            continue
+
+        user_ref = item_doc.reference.parent.parent
+        if user_ref is None:
+            logger.error("Unable to determine user for item %s", item_doc.id)
+            continue
+
+        user_id = user_ref.id
+        item_key = f"{user_id}_{item_doc.id}"
+        if item_key in processed_items:
+            continue
+
+        processed_items.add(item_key)
+        logger.info("Found processing item %s for user %s", item_doc.id, user_id)
+        process_item(item_doc.reference, item_doc.id, item_data)
+
+
+def on_demo_snapshot(col_snapshot, changes, read_time):
+    """Process newly added or changed shared demo documents."""
+    for change in changes:
+        item_doc = change.document
+        item_data = item_doc.to_dict()
+        if item_data.get('status') != 'processing':
+            continue
+
+        item_key = f"demo_{item_doc.id}"
+        if item_key in processed_items:
+            continue
+
+        processed_items.add(item_key)
+        logger.info("Found demo processing item %s", item_doc.id)
+        process_item(item_doc.reference, item_doc.id, item_data)
 
 
 def process_item(item_ref, item_id: str, item_data: dict):
@@ -153,6 +151,7 @@ def process_item(item_ref, item_id: str, item_data: dict):
                 'reason': 'Analysis incomplete',
                 'source_link': ''
             }),
+            'sources': ai_result.get('sources', []),
             'urgency_score': ai_result.get('urgency_score', 5),
             'status': ui_status,
             'error_message': ''

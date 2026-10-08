@@ -21,7 +21,8 @@ export async function addVideoToFirestore(url: string) {
         status: 'Unverified',
         reason: 'Analysis in progress...',
         source_link: ''
-      }
+      },
+      sources: []
     })
     console.log('✅ Document added with ID:', docRef.id)
   } catch (error) {
