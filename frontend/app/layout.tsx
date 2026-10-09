@@ -6,7 +6,6 @@ import "./globals.css"
 const _geist = Geist({ subsets: ["latin"] })
 const _geistMono = Geist_Mono({ subsets: ["latin"] })
 
-// <CHANGE> Updated metadata for Chestify branding
 export const metadata: Metadata = {
   title: "Chestify - Turn Noise into Knowledge",
   description: "Turn short-form noise into a treasure chest of knowledge. AI-verified education for quality learning.",
