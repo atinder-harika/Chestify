@@ -1,7 +1,7 @@
 """
 Firestore Listener Service
 Watches for new items with status='processing' and triggers AI pipeline
-Owner: Backend team
+Owner: Atinder Singh Hari
 Review focus: Real-time Firestore listeners, duplicate protection, and processing status updates.
 """
 

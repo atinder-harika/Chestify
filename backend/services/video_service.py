@@ -1,7 +1,7 @@
 """
 Video Extraction Service using yt-dlp
 Extracts metadata and transcripts from YouTube Shorts, TikTok, etc.
-Owner: Backend team
+Owner: Christain Malan
 Review focus: Video metadata extraction, subtitle parsing, URL validation, and errors.
 """
 

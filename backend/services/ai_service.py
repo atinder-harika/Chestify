@@ -1,7 +1,7 @@
 """
 AI Analysis Service using Google Gemini 2.5 Flash
 Performs summarization, categorization, and fact-checking with Google Search grounding
-Owner: Backend team
+Owner: Christain Malan
 Review focus: Gemini analysis, grounded source extraction, retries, and safe fallbacks.
 """
 
