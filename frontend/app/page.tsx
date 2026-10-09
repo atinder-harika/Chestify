@@ -6,34 +6,28 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { DirectionAwareHover } from "@/components/direction-aware-hover"
-import { CheckCircle2, AlertTriangle, Loader2, Send, Plus, Package, Moon, Sun, Clock, Palette, XCircle } from "lucide-react"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
+import { CheckCircle2, AlertTriangle, Loader2, Send, Plus, Package, Clock, XCircle } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { auth, db, googleProvider } from "@/lib/firebase/config"
-import { collection, query, onSnapshot, orderBy } from "firebase/firestore"
+import { collection, query, onSnapshot, orderBy, Timestamp } from "firebase/firestore"
 import { onAuthStateChanged, signInWithPopup, signOut, type User } from "firebase/auth"
 import { addVideoToFirestore } from "@/lib/firestore-helpers"
+import { ThemeControls } from "@/components/theme-controls"
 import { UserProfileDropdown } from "@/components/user-profile-dropdown"
 
-// Helper function to format timestamps
-function formatShortDate(timestamp: any): string {
+type TimestampValue = Timestamp | { seconds: number } | Date | string | number
+
+function formatShortDate(timestamp: TimestampValue): string {
   try {
-    // Handle Firestore Timestamp object
     let date: Date;
-    if (timestamp?.toDate) {
+    if (timestamp instanceof Timestamp) {
       date = timestamp.toDate();
-    } else if (timestamp?.seconds) {
+    } else if (typeof timestamp === "object" && "seconds" in timestamp) {
       date = new Date(timestamp.seconds * 1000);
     } else {
       date = new Date(timestamp);
     }
     
-    // Format as "23 Nov 2025"
     return date.toLocaleDateString('en-GB', { 
       day: 'numeric', 
       month: 'short', 
@@ -44,15 +38,33 @@ function formatShortDate(timestamp: any): string {
   }
 }
 
-// Mock items removed - using only real Firestore data
-
 type TabType = "library" | "add" | "chat"
 type FilterType = "all" | "verified" | "misleading" | "processing"
 
 type RecentActivity = {
   url: string
-  status: "processing" | "verified" | "failed"
+  status: "processing" | "verified" | "misleading" | "failed"
   timestamp: string
+}
+
+type VideoStatus = "processing" | "verified" | "misleading" | "unverified" | "error"
+
+type VideoItem = {
+  id: string
+  url: string
+  title: string
+  summary: string
+  category: string
+  tags: string[]
+  thumbnail?: string
+  status: VideoStatus
+  error_message?: string
+  created_at?: TimestampValue
+  fact_check?: {
+    status?: string
+    reason?: string
+    source_link?: string
+  }
 }
 
 const themes = {
@@ -61,7 +73,6 @@ const themes = {
     gradient: "from-yellow-400 to-white",
     gradientDark: "from-yellow-400 via-yellow-200 to-white",
     buttonGradient: "from-yellow-400 to-yellow-200",
-    buttonHover: "from-yellow-300 to-yellow-100",
     activeTab: "bg-yellow-500/20 text-yellow-400 border-yellow-500/50",
     activeTabLight: "bg-yellow-400 text-black border-yellow-400",
     filterActive: "from-yellow-400 to-yellow-200",
@@ -73,7 +84,6 @@ const themes = {
     gradient: "from-cyan-400 to-blue-600",
     gradientDark: "from-cyan-400 via-blue-400 to-blue-600",
     buttonGradient: "from-cyan-400 to-blue-500",
-    buttonHover: "from-cyan-300 to-blue-400",
     activeTab: "bg-cyan-500/20 text-cyan-400 border-cyan-500/50",
     activeTabLight: "bg-cyan-400 text-black border-cyan-400",
     filterActive: "from-cyan-400 to-blue-500",
@@ -85,7 +95,6 @@ const themes = {
     gradient: "from-fuchsia-500 to-pink-600",
     gradientDark: "from-fuchsia-500 via-pink-400 to-pink-600",
     buttonGradient: "from-fuchsia-500 to-pink-500",
-    buttonHover: "from-fuchsia-400 to-pink-400",
     activeTab: "bg-fuchsia-500/20 text-fuchsia-400 border-fuchsia-500/50",
     activeTabLight: "bg-fuchsia-400 text-black border-fuchsia-400",
     filterActive: "from-fuchsia-500 to-pink-500",
@@ -97,7 +106,6 @@ const themes = {
     gradient: "from-emerald-400 to-lime-500",
     gradientDark: "from-emerald-400 via-lime-400 to-lime-500",
     buttonGradient: "from-emerald-400 to-lime-400",
-    buttonHover: "from-emerald-300 to-lime-300",
     activeTab: "bg-emerald-500/20 text-emerald-400 border-emerald-500/50",
     activeTabLight: "bg-emerald-400 text-black border-emerald-400",
     filterActive: "from-emerald-400 to-lime-400",
@@ -109,7 +117,6 @@ const themes = {
     gradient: "from-red-600 to-orange-500",
     gradientDark: "from-red-600 to-orange-500",
     buttonGradient: "from-red-600 to-orange-500",
-    buttonHover: "from-red-500 to-orange-400",
     activeTab: "bg-gradient-to-br from-red-600/20 to-orange-500/20 border-red-500/50 text-orange-100",
     activeTabLight: "bg-gradient-to-r from-red-600 to-orange-500 text-white border-red-500",
     filterActive: "from-red-600 to-orange-500",
@@ -121,7 +128,6 @@ const themes = {
     gradient: "from-indigo-500 to-cyan-400",
     gradientDark: "from-indigo-500 via-purple-500 to-cyan-400",
     buttonGradient: "from-indigo-600 to-cyan-500",
-    buttonHover: "from-indigo-500 to-cyan-400",
     activeTab: "bg-gradient-to-br from-indigo-600/20 to-cyan-500/20 border-indigo-500/50 text-cyan-50",
     activeTabLight: "bg-gradient-to-r from-indigo-600 to-cyan-500 text-white border-indigo-500",
     filterActive: "from-indigo-600 to-cyan-500",
@@ -133,7 +139,6 @@ const themes = {
     gradient: "from-blue-600 to-red-500",
     gradientDark: "from-blue-600 to-red-500",
     buttonGradient: "from-blue-600 to-red-500",
-    buttonHover: "from-blue-500 to-red-400",
     activeTab: "bg-gradient-to-br from-blue-600/20 to-red-500/20 border-blue-500/50 text-blue-100",
     activeTabLight: "bg-gradient-to-r from-blue-600 to-red-500 text-white border-blue-500",
     filterActive: "from-blue-600 to-red-500",
@@ -154,14 +159,13 @@ export default function ChestifyApp() {
   const [isDark, setIsDark] = useState(true)
   const [activeTheme, setActiveTheme] = useState<keyof typeof themes>("fire-ice")
   const [recentActivity, setRecentActivity] = useState<RecentActivity[]>([])
-  const [firestoreItems, setFirestoreItems] = useState<any[]>([])
+  const [firestoreItems, setFirestoreItems] = useState<VideoItem[]>([])
   const [user, setUser] = useState<User | null>(null)
   const [authLoading, setAuthLoading] = useState(true)
   const [authError, setAuthError] = useState<string | null>(null)
 
   const currentTheme = themes[activeTheme]
 
-  // Load theme from localStorage on mount
   useEffect(() => {
     if (typeof window !== "undefined") {
       try {
@@ -175,7 +179,6 @@ export default function ChestifyApp() {
     }
   }, [])
 
-  // Save theme to localStorage when it changes
   useEffect(() => {
     if (typeof window !== "undefined") {
       try {
@@ -206,14 +209,13 @@ export default function ChestifyApp() {
     const q = query(itemsRef, orderBy("created_at", "desc"))
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const items: any[] = []
+      const items: VideoItem[] = []
       snapshot.forEach((doc) => {
-        items.push({ id: doc.id, ...doc.data() })
+        items.push({ id: doc.id, ...doc.data() } as VideoItem)
       })
       setFirestoreItems(items)
       
-      // Update recent activity with latest 3 items
-      const recent = items.slice(0, 3).map((item) => ({
+      const recent: RecentActivity[] = items.slice(0, 3).map((item) => ({
         url: item.url,
         status: item.status === 'verified' || item.status === 'misleading' ? item.status : 'processing',
         timestamp: item.created_at ? formatShortDate(item.created_at) : 'Just now'
@@ -283,7 +285,6 @@ export default function ChestifyApp() {
     setChatInput("")
 
     try {
-      // Call chat API with context if available
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
       const response = await fetch(`${apiUrl}/chat`, {
         method: "POST",
@@ -319,21 +320,18 @@ export default function ChestifyApp() {
     }
   }
 
-  const handleOpenAIAnalysis = (e: React.MouseEvent, item: any) => {
+  const handleOpenAIAnalysis = (e: React.MouseEvent, item: VideoItem) => {
     e.preventDefault()
     e.stopPropagation()
     
-    // Create context string with video details
     const context = `Title: ${item.title}\nSummary: ${item.summary}\nFact Check: ${item.fact_check?.reason || "N/A"}\nStatus: ${item.status}`
     setCurrentVideoContext(context)
     
-    // Add initial assistant message
     setMessages([{
       role: "assistant",
       content: `I've loaded the analysis for "${item.title}". What would you like to know about this video?`
     }])
     
-    // Switch to chat tab
     setActiveTab("chat")
   }
 
@@ -341,7 +339,6 @@ export default function ChestifyApp() {
     setChatInput(question)
   }
 
-  // Use only real Firestore items
   const allItems = firestoreItems
   
   const filteredItems = allItems.filter((item) => {
@@ -386,54 +383,14 @@ export default function ChestifyApp() {
         />
 
         <header className="absolute top-0 right-0 p-6 z-20">
-          <div className="flex items-center gap-4">
-            {/* Theme Color Picker */}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className={cn(
-                    "rounded-full",
-                    isDark ? `${currentTheme.icon} hover:bg-white/10` : "text-neutral-600 hover:bg-neutral-100",
-                  )}
-                >
-                  <Palette className="w-5 h-5" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent
-                align="end"
-                className={cn(
-                  "w-48 backdrop-blur-md border",
-                  isDark ? "bg-neutral-900/80 border-white/10" : "bg-white border-neutral-200",
-                )}
-              >
-                {Object.entries(themes).map(([key, theme]) => (
-                  <DropdownMenuItem
-                    key={key}
-                    onClick={() => setActiveTheme(key as keyof typeof themes)}
-                    className={cn("cursor-pointer flex items-center gap-2", activeTheme === key && "bg-white/10")}
-                  >
-                    <div className={`w-4 h-4 rounded-full bg-gradient-to-r ${theme.buttonGradient}`} />
-                    <span className={isDark ? "text-white" : "text-neutral-900"}>{theme.name}</span>
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
-
-            {/* Light/Dark Toggle */}
-            <Button
-              onClick={() => setIsDark(!isDark)}
-              variant="ghost"
-              size="icon"
-              className={cn(
-                "rounded-full",
-                isDark ? `${currentTheme.icon} hover:bg-white/10` : "text-neutral-600 hover:bg-neutral-100",
-              )}
-            >
-              {isDark ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
-            </Button>
-          </div>
+          <ThemeControls
+            isDark={isDark}
+            activeTheme={activeTheme}
+            currentTheme={currentTheme}
+            themes={themes}
+            onThemeChange={(theme) => setActiveTheme(theme as keyof typeof themes)}
+            onToggleDark={() => setIsDark(!isDark)}
+          />
         </header>
 
         <div className="relative z-10 flex flex-col items-center justify-center min-h-screen px-6">
@@ -512,53 +469,14 @@ export default function ChestifyApp() {
                     currentTheme={currentTheme}
                   />
                 )}
-                {/* Theme Color Picker */}
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className={cn(
-                        "rounded-full",
-                        isDark ? `${currentTheme.icon} hover:bg-white/10` : "text-neutral-600 hover:bg-neutral-100",
-                      )}
-                    >
-                      <Palette className="w-5 h-5" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent
-                    align="end"
-                    className={cn(
-                      "w-48 backdrop-blur-md border",
-                      isDark ? "bg-neutral-900/80 border-white/10" : "bg-white border-neutral-200",
-                    )}
-                  >
-                    {Object.entries(themes).map(([key, theme]) => (
-                      <DropdownMenuItem
-                        key={key}
-                        onClick={() => setActiveTheme(key as keyof typeof themes)}
-                        className={cn("cursor-pointer flex items-center gap-2", activeTheme === key && "bg-white/10")}
-                      >
-                        <div className={`w-4 h-4 rounded-full bg-gradient-to-r ${theme.buttonGradient}`} />
-                        <span className={isDark ? "text-white" : "text-neutral-900"}>{theme.name}</span>
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-
-                {/* Light/Dark Toggle */}
-                <Button
-                  onClick={() => setIsDark(!isDark)}
-                  variant="ghost"
-                  size="icon"
-                  className={cn(
-                    "rounded-full",
-                    isDark ? `${currentTheme.icon} hover:bg-white/10` : "text-neutral-600 hover:bg-neutral-100",
-                  )}
-                >
-                  {isDark ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
-                </Button>
-
+                <ThemeControls
+                  isDark={isDark}
+                  activeTheme={activeTheme}
+                  currentTheme={currentTheme}
+                  themes={themes}
+                  onThemeChange={(theme) => setActiveTheme(theme as keyof typeof themes)}
+                  onToggleDark={() => setIsDark(!isDark)}
+                />
               </div>
             </div>
           </div>
@@ -685,7 +603,6 @@ export default function ChestifyApp() {
                     )}
                     childrenClassName="inset-0 flex flex-col justify-between p-6"
                   >
-                    {/* Top Section: Platform Badge and Status Icon */}
                     <div className="flex items-start justify-between">
                       <Badge className="backdrop-blur-sm text-xs bg-black/70 text-white/90 border-white/20">
                         {item.url.includes("youtube") ? "YouTube Shorts" : "TikTok"}
@@ -699,9 +616,7 @@ export default function ChestifyApp() {
                       </div>
                     </div>
 
-                    {/* Bottom Section: Content */}
                     <div className="space-y-3">
-                      {/* Title and Category */}
                       <div>
                         <Badge variant="outline" className="text-xs border-white/30 text-white/70 mb-2">
                           {item.category}
@@ -709,7 +624,6 @@ export default function ChestifyApp() {
                         <h3 className="text-lg font-semibold text-white mb-2">{item.title}</h3>
                       </div>
 
-                      {/* Tags */}
                       <div className="flex flex-wrap gap-2">
                         {item.tags.map((tag: string) => (
                           <Badge key={tag} variant="secondary" className="text-xs bg-white/10 text-white/80 border-white/20">
@@ -718,7 +632,6 @@ export default function ChestifyApp() {
                         ))}
                       </div>
 
-                      {/* Status-specific content */}
                       {item.status === "processing" ? (
                         <div className="space-y-2">
                           <div className="h-3 rounded animate-pulse bg-white/20" />
@@ -741,7 +654,6 @@ export default function ChestifyApp() {
                         </div>
                       ) : (
                         <div className="space-y-3">
-                          {/* Fact Check Status Box */}
                           <div
                             className={cn(
                               "p-3 rounded-lg border backdrop-blur-sm",
@@ -758,8 +670,8 @@ export default function ChestifyApp() {
                             >
                               {item.status === "verified" ? "✓ VERIFIED" : "⚠ MISLEADING"}
                             </p>
-                            <p className="text-xs text-white/90 mb-2">{item.fact_check.reason}</p>
-                            {item.fact_check.source_link ? (
+                            <p className="text-xs text-white/90 mb-2">{item.fact_check?.reason}</p>
+                            {item.fact_check?.source_link ? (
                               <a
                                 href={item.fact_check.source_link}
                                 target="_blank"
@@ -777,7 +689,6 @@ export default function ChestifyApp() {
                             )}
                           </div>
 
-                          {/* AI Analysis Button for all content */}
                           <Button
                             size="sm"
                             onClick={(e) => handleOpenAIAnalysis(e, item)}
@@ -1042,7 +953,7 @@ export default function ChestifyApp() {
         >
           <div className="container mx-auto px-6">
             <p className={cn("text-center text-sm font-light", isDark ? "text-white/40" : "text-neutral-500")}>
-              Copyright © 2025 Chestify | Hackathon project - Atinder & Chahatbir
+              Copyright © 2026 Chestify | Capstone project - Group 12
             </p>
           </div>
         </footer>

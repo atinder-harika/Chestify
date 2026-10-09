@@ -39,3 +39,8 @@ These items are intentionally deferred while restoring the public demo.
 - Improve loading, error, empty-state, retry, mobile, and accessibility UX.
 - Add processing progress and large-library pagination.
 - Add analytics only after privacy requirements are defined.
+
+## Frontend maintainability
+- Decompose `frontend/app/page.tsx` into cohesive hooks and components once
+  behavior changes are planned: authentication, Firestore items, the video
+  library, chat, the landing page, and the authenticated app header.
