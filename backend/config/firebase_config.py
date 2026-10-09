@@ -1,6 +1,6 @@
 """
 Firebase Admin SDK Configuration
-Owner: Backend team
+Owner: Atinder Singh Hari
 Review focus: Firebase Admin credentials, singleton initialization, and Firestore access.
 """
 
