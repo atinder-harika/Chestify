@@ -1,5 +1,7 @@
 """
 Firebase Admin SDK Configuration
+Owner: Backend team
+Review focus: Firebase Admin credentials, singleton initialization, and Firestore access.
 """
 
 import os
@@ -11,7 +13,6 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# Load environment variables
 load_dotenv()
 
 db = None

@@ -19,6 +19,7 @@ import { onAuthStateChanged, signInWithPopup, signOut, type User } from "firebas
 import { addVideoToFirestore } from "@/lib/firestore-helpers"
 import { ThemeControls } from "@/components/theme-controls"
 import { UserProfileDropdown } from "@/components/user-profile-dropdown"
+import ReactMarkdown from "react-markdown"
 
 type TimestampValue = Timestamp | { seconds: number } | Date | string | number
 
@@ -898,7 +899,41 @@ export default function ChestifyApp() {
                                   : "mr-auto bg-neutral-100 border border-neutral-200 text-neutral-900",
                             )}
                           >
-                            {msg.content}
+                            <ReactMarkdown
+                              components={{
+                                h1: ({ children }) => <h1 className="text-xl font-semibold mb-2">{children}</h1>,
+                                h2: ({ children }) => <h2 className="text-lg font-semibold mb-2">{children}</h2>,
+                                h3: ({ children }) => <h3 className="text-base font-semibold mb-1">{children}</h3>,
+                                p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+                                ul: ({ children }) => <ul className="list-disc pl-5 mb-2 space-y-1">{children}</ul>,
+                                ol: ({ children }) => <ol className="list-decimal pl-5 mb-2 space-y-1">{children}</ol>,
+                                a: ({ children, href }) => (
+                                  <a
+                                    href={href}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className={cn(
+                                      "underline",
+                                      isDark ? "text-cyan-300 hover:text-cyan-200" : "text-blue-600 hover:text-blue-500",
+                                    )}
+                                  >
+                                    {children}
+                                  </a>
+                                ),
+                                code: ({ children }) => (
+                                  <code
+                                    className={cn(
+                                      "rounded px-1 py-0.5 text-sm",
+                                      isDark ? "bg-white/10" : "bg-neutral-200",
+                                    )}
+                                  >
+                                    {children}
+                                  </code>
+                                ),
+                              }}
+                            >
+                              {msg.content}
+                            </ReactMarkdown>
                           </div>
                         ))
                       )}
