@@ -28,17 +28,17 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup and shutdown events"""
-    logger.info("🚀 Starting Chestify Backend...")
+    logger.info("Starting Chestify Backend...")
     
     initialize_firebase()
-    logger.info("✅ Firebase initialized")
+    logger.info("Firebase initialized")
     
     firestore_listener.start_firestore_listener()
-    logger.info("✅ Firestore listener started")
+    logger.info("Firestore listener started")
     
     yield
     
-    logger.info("🛑 Shutting down Chestify Backend...")
+    logger.info("Shutting down Chestify Backend...")
 
 
 app = FastAPI(
