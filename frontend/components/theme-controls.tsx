@@ -1,5 +1,10 @@
 "use client"
 
+/*
+ * Owner: Dhruti Harshadbhai Prajapati
+ * Review focus: Theme selection and light/dark mode controls shared by both headers.
+ */
+
 import { Moon, Palette, Sun } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -26,6 +31,8 @@ type ThemeControlsProps = {
   onToggleDark: () => void
 }
 
+// Maps the supplied theme record into a Radix dropdown and invokes the parent
+// callbacks when a theme or the light/dark mode is selected.
 export function ThemeControls({
   isDark,
   activeTheme,

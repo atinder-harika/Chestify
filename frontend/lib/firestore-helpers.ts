@@ -1,6 +1,13 @@
+/*
+ * Owner: Dhruti Harshadbhai Prajapati
+ * Review focus: Authenticated creation of user-owned video processing records.
+ */
+
 import { auth, db } from './firebase/config'
 import { collection, addDoc, Timestamp } from 'firebase/firestore'
 
+// Verifies Firebase Auth, creates the users/{uid}/items collection reference,
+// and writes a processing record for the backend listener to consume.
 export async function addVideoToFirestore(url: string) {
   console.log('📝 Adding video:', url)
 

@@ -1,11 +1,18 @@
 "use client"
 
+/*
+ * Owner: Chahatbir Singh
+ * Review focus: Direction-aware hover animation for video card imagery and details.
+ */
+
 import type React from "react"
 
 import { useRef, useState } from "react"
 import { AnimatePresence, motion } from "framer-motion"
 import { cn } from "@/lib/utils"
 
+// Renders the image and children overlay, using Framer Motion variants to
+// animate the card from the edge where the pointer entered.
 export const DirectionAwareHover = ({
   imageUrl,
   children,
@@ -23,6 +30,8 @@ export const DirectionAwareHover = ({
 
   const [direction, setDirection] = useState<"top" | "bottom" | "left" | "right" | string>("left")
 
+  // Measures the pointer entry against the card bounds, calls getDirection,
+  // and stores the matching motion variant name in component state.
   const handleMouseEnter = (event: React.MouseEvent<HTMLDivElement, MouseEvent>) => {
     if (!ref.current) return
 
@@ -46,6 +55,8 @@ export const DirectionAwareHover = ({
     }
   }
 
+  // Normalizes pointer coordinates around the card center and converts the
+  // resulting angle into top, right, bottom, or left using a modulo index.
   const getDirection = (ev: React.MouseEvent<HTMLDivElement, MouseEvent>, obj: HTMLElement) => {
     const { width: w, height: h, left, top } = obj.getBoundingClientRect()
     const x = ev.clientX - left - (w / 2) * (w > h ? h / w : 1)

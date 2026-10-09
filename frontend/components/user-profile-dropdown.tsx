@@ -1,5 +1,10 @@
 "use client"
 
+/*
+ * Owner: Dhruti Harshadbhai Prajapati
+ * Review focus: Authenticated user profile display, account actions, and sign-out menu.
+ */
+
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import {
   DropdownMenu,
@@ -30,12 +35,16 @@ interface UserProfileDropdownProps {
   }
 }
 
+// Renders the user's avatar and Radix menu, wiring settings and sign-out
+// actions to the callbacks supplied by the parent page.
 export function UserProfileDropdown({ isDark, onSignOut, user, currentTheme }: UserProfileDropdownProps) {
-  // Show nothing if user is not loaded yet
+  // Avoids rendering an empty account control until Firebase user data exists.
   if (!user) {
     return null
   }
 
+  // Handles the current settings placeholder until an account settings route
+  // is implemented.
   const handleSettingsClick = () => {
     console.log("Settings clicked")
   }
