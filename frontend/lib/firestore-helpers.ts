@@ -9,7 +9,7 @@ import { collection, addDoc, Timestamp } from 'firebase/firestore'
 // Verifies Firebase Auth, creates the users/{uid}/items collection reference,
 // and writes a processing record for the backend listener to consume.
 export async function addVideoToFirestore(url: string) {
-  console.log('📝 Adding video:', url)
+  console.log('Adding video:', url)
 
   const user = auth.currentUser
   if (!user) {
@@ -17,7 +17,7 @@ export async function addVideoToFirestore(url: string) {
   }
 
   const itemsRef = collection(db, 'users', user.uid, 'items')
-  console.log('📂 Collection path:', `users/${user.uid}/items`)
+  console.log('Collection path:', `users/${user.uid}/items`)
   
   try {
     const docRef = await addDoc(itemsRef, {
@@ -36,9 +36,9 @@ export async function addVideoToFirestore(url: string) {
       },
       sources: []
     })
-    console.log('✅ Document added with ID:', docRef.id)
+    console.log('Document added with ID:', docRef.id)
   } catch (error) {
-    console.error('❌ Error adding document:', error)
+    console.error('Error adding document:', error)
     throw error
   }
 }
