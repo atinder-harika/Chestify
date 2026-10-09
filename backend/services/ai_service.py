@@ -1,6 +1,8 @@
 """
 AI Analysis Service using Google Gemini 2.5 Flash
 Performs summarization, categorization, and fact-checking with Google Search grounding
+Owner: Backend team
+Review focus: Gemini analysis, grounded source extraction, retries, and safe fallbacks.
 """
 
 import os
@@ -13,7 +15,6 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# Initialize Gemini client
 _gemini_client = None
 
 def initialize_gemini():
@@ -23,7 +24,6 @@ def initialize_gemini():
     if _gemini_client:
         return _gemini_client  # Already initialized
     
-    # Force reload from .env file
     from dotenv import load_dotenv
     load_dotenv(override=True)
     
@@ -73,8 +73,11 @@ def analyze_content(title: str, transcript: str, url: str) -> Dict:
         # Initialize Gemini client on first call
         client = initialize_gemini()
         
-        # Grounding is deferred until a project with Search quota is configured.
-        config = types.GenerateContentConfig()
+        # Ground every analysis against current web sources so fact-check statuses
+        # are based on external evidence rather than the model's training data.
+        config = types.GenerateContentConfig(
+            tools=[types.Tool(google_search=types.GoogleSearch())]
+        )
         
         # Construct prompt
         prompt = f"""
@@ -89,8 +92,9 @@ URL: {url}
 1. Generate a concise summary (2-3 sentences)
 2. Categorize into ONE of: Physics, Chemistry, Biology, Math, Computer Science, History, Psychology, Health, Web Development, Business, or Other
 3. Extract 3-5 relevant tags
-4. Do not claim that the content was externally fact-checked. Without Search
-   grounding, mark the fact check as "Unverified".
+4. Compare the factual claims against the grounded search results and explain
+   the evidence in the reason. If the available evidence is insufficient, mark
+   the fact check as "Unverified".
    - "Verified": Accurate and supported by reliable sources
    - "Questionable": Contains some inaccuracies or lacks sources
    - "False": Contains misinformation or pseudoscience
@@ -190,62 +194,3 @@ def get_fallback_analysis(title: str, transcript: str) -> Dict:
         "sources": [],
         "urgency_score": 5
     }
-
-
-def generate_category_from_text(text: str) -> str:
-    """
-    Simple category extraction from text (fallback method)
-    
-    Args:
-        text: Combined title and transcript
-    
-    Returns:
-        Category string
-    """
-    text_lower = text.lower()
-    
-    category_keywords = {
-        "Physics": ["physics", "quantum", "mechanics", "energy", "force"],
-        "Chemistry": ["chemistry", "molecule", "reaction", "chemical", "element"],
-        "Biology": ["biology", "cell", "organism", "evolution", "genetics"],
-        "Math": ["math", "algebra", "calculus", "equation", "theorem"],
-        "Computer Science": ["code", "programming", "algorithm", "software", "python", "javascript"],
-        "Web Development": ["html", "css", "frontend", "backend", "react", "div"],
-        "Health": ["health", "diet", "fitness", "nutrition", "medical"],
-        "Psychology": ["psychology", "behavior", "mental", "cognitive"],
-        "Business": ["business", "marketing", "entrepreneur", "startup"],
-        "History": ["history", "historical", "ancient", "war", "civilization"]
-    }
-    
-    for category, keywords in category_keywords.items():
-        if any(keyword in text_lower for keyword in keywords):
-            return category
-    
-    return "Other"
-
-
-def extract_tags_from_text(text: str, max_tags: int = 5) -> List[str]:
-    """
-    Extract relevant tags from text
-    
-    Args:
-        text: Combined title and transcript
-        max_tags: Maximum number of tags to return
-    
-    Returns:
-        List of tags
-    """
-    # Common educational keywords
-    common_tags = [
-        "Science", "Education", "Tutorial", "Learning", "Explained",
-        "Quick Tips", "Study", "Knowledge", "Facts", "Guide"
-    ]
-    
-    text_lower = text.lower()
-    found_tags = [tag for tag in common_tags if tag.lower() in text_lower]
-    
-    # Add default if none found
-    if not found_tags:
-        found_tags = ["Educational", "Video Content"]
-    
-    return found_tags[:max_tags]

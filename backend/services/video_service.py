@@ -1,11 +1,13 @@
 """
 Video Extraction Service using yt-dlp
 Extracts metadata and transcripts from YouTube Shorts, TikTok, etc.
+Owner: Backend team
+Review focus: Video metadata extraction, subtitle parsing, URL validation, and errors.
 """
 
 import yt_dlp
 import logging
-from typing import Dict, Optional
+from typing import Any, Dict
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +17,7 @@ class VideoExtractionError(Exception):
     pass
 
 
-def extract_video_info(url: str) -> Dict[str, any]:
+def extract_video_info(url: str) -> Dict[str, Any]:
     """
     Extract video metadata and transcript from URL
     
@@ -96,29 +98,23 @@ def extract_transcript(info: Dict) -> str:
     """
     transcript_parts = []
     
-    # Try automatic captions first (usually available for YouTube)
+    # Prefer automatic captions because they are usually available for YouTube.
     subtitles = info.get('automatic_captions', {})
     
-    # If no automatic captions, try manual subtitles
     if not subtitles:
         subtitles = info.get('subtitles', {})
     
-    # Extract English subtitles
     if 'en' in subtitles:
         for subtitle in subtitles['en']:
             if 'data' in subtitle:
-                # Direct subtitle data
                 transcript_parts.append(subtitle['data'])
             elif subtitle.get('ext') == 'json3':
-                # YouTube's JSON3 format - would need additional parsing
-                # For now, skip and use description as fallback
+                # JSON3 captions require a parser that is not currently enabled.
                 continue
     
     transcript = ' '.join(transcript_parts).strip()
     
-    # Clean up transcript
     if transcript:
-        # Remove timestamp markers like [00:00]
         import re
         transcript = re.sub(r'\[\d+:\d+\]', '', transcript)
         transcript = re.sub(r'\s+', ' ', transcript).strip()

@@ -1,6 +1,8 @@
 """
 Chestify Backend - FastAPI Server
 Listens to Firestore and processes educational content with AI fact-checking
+Owner: Backend team
+Review focus: FastAPI lifecycle, CORS, health checks, and chat API routing.
 """
 
 from dotenv import load_dotenv
@@ -16,7 +18,6 @@ from services import firestore_listener
 from services.ai_service import initialize_gemini
 import uvicorn
 
-# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -29,11 +30,9 @@ async def lifespan(app: FastAPI):
     """Startup and shutdown events"""
     logger.info("🚀 Starting Chestify Backend...")
     
-    # Initialize Firebase
     initialize_firebase()
     logger.info("✅ Firebase initialized")
     
-    # Start Firestore listener
     firestore_listener.start_firestore_listener()
     logger.info("✅ Firestore listener started")
     
@@ -49,7 +48,6 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS Configuration
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -94,7 +92,6 @@ async def chat(request: ChatRequest):
     try:
         client = initialize_gemini()
         
-        # Build prompt with context if provided
         if request.context:
             prompt = f"""You are a helpful AI assistant for Chestify, an educational content platform.
 
@@ -111,7 +108,6 @@ User question: {request.message}
 
 Provide a helpful, accurate response."""
         
-        # Generate response using Gemini
         response = client.models.generate_content(
             model="gemini-3.1-flash-lite",
             contents=prompt

@@ -1,6 +1,8 @@
 """
 Firestore Listener Service
 Watches for new items with status='processing' and triggers AI pipeline
+Owner: Backend team
+Review focus: Real-time Firestore listeners, duplicate protection, and processing status updates.
 """
 
 import logging
@@ -12,7 +14,6 @@ from services.ai_service import analyze_content
 
 logger = logging.getLogger(__name__)
 
-# Track processed items to avoid duplicates
 processed_items = set()
 listener_status = "inactive"
 
@@ -48,7 +49,6 @@ def listen_to_firestore():
         listener_status = "active"
         logger.info("Firestore processing listeners registered")
 
-        # Keep this daemon thread alive while the Firestore SDK owns the listener.
         threading.Event().wait()
     except Exception:
         listener_status = "error"
@@ -56,42 +56,42 @@ def listen_to_firestore():
 
 
 def on_processing_snapshot(col_snapshot, changes, read_time):
-    """Process newly added or changed documents requiring analysis."""
-    for change in changes:
-        item_doc = change.document
-        item_data = item_doc.to_dict()
-        if item_data.get('status') != 'processing':
-            continue
-
-        user_ref = item_doc.reference.parent.parent
-        if user_ref is None:
-            logger.error("Unable to determine user for item %s", item_doc.id)
-            continue
-
-        user_id = user_ref.id
-        item_key = f"{user_id}_{item_doc.id}"
-        if item_key in processed_items:
-            continue
-
-        processed_items.add(item_key)
-        logger.info("Found processing item %s for user %s", item_doc.id, user_id)
-        process_item(item_doc.reference, item_doc.id, item_data)
+    """Process user-scoped documents requiring analysis."""
+    _process_snapshot_changes(changes, "user")
 
 
 def on_demo_snapshot(col_snapshot, changes, read_time):
-    """Process newly added or changed shared demo documents."""
+    """Process shared demo documents requiring analysis."""
+    _process_snapshot_changes(changes, "demo")
+
+
+def _process_snapshot_changes(changes, collection_scope: str):
+    """Filter processing changes, deduplicate them, and start the pipeline."""
     for change in changes:
         item_doc = change.document
         item_data = item_doc.to_dict()
         if item_data.get('status') != 'processing':
             continue
 
-        item_key = f"demo_{item_doc.id}"
+        user_id = None
+        if collection_scope == "user":
+            user_ref = item_doc.reference.parent.parent
+            if user_ref is None:
+                logger.error("Unable to determine user for item %s", item_doc.id)
+                continue
+            user_id = user_ref.id
+            item_key = f"{user_id}_{item_doc.id}"
+        else:
+            item_key = f"demo_{item_doc.id}"
+
         if item_key in processed_items:
             continue
 
         processed_items.add(item_key)
-        logger.info("Found demo processing item %s", item_doc.id)
+        if user_id:
+            logger.info("Found processing item %s for user %s", item_doc.id, user_id)
+        else:
+            logger.info("Found demo processing item %s", item_doc.id)
         process_item(item_doc.reference, item_doc.id, item_data)
 
 
@@ -112,7 +112,6 @@ def process_item(item_ref, item_id: str, item_data: dict):
         
         logger.info(f"📹 Extracting video info from: {url}")
         
-        # Step 1: Extract video metadata
         video_info = extract_video_info(url)
         
         # Update with video info
@@ -124,17 +123,14 @@ def process_item(item_ref, item_id: str, item_data: dict):
         
         logger.info(f"🤖 Analyzing content with AI: {video_info['title']}")
         
-        # Step 2: AI Analysis with fact-checking
         ai_result = analyze_content(
             title=video_info['title'],
             transcript=video_info['transcript'],
             url=url
         )
         
-        # Step 3: Update Firestore with complete results
         fact_check_status = ai_result.get('fact_check', {}).get('status', 'Unverified')
         
-        # Map AI fact_check.status to UI status
         if fact_check_status == 'Verified':
             ui_status = 'verified'
         elif fact_check_status in ['False', 'Questionable']:
@@ -174,15 +170,3 @@ def process_item(item_ref, item_id: str, item_data: dict):
             'status': 'error',
             'error_message': f"Processing error: {str(e)}"
         })
-
-
-def on_snapshot(col_snapshot, changes, read_time):
-    """
-    Alternative: Real-time snapshot listener (if needed)
-    Currently using polling for simplicity
-    """
-    for change in changes:
-        if change.type.name == 'ADDED':
-            doc = change.document
-            logger.info(f"New document: {doc.id}")
-            # Process document
