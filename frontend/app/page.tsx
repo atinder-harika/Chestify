@@ -1,5 +1,10 @@
 "use client"
 
+/*
+ * Owner: Chahatbir Singh
+ * Review focus: Main application flow, authentication, Firestore items, themes, and chat.
+ */
+
 import { useState, useEffect } from "react"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -17,6 +22,8 @@ import { UserProfileDropdown } from "@/components/user-profile-dropdown"
 
 type TimestampValue = Timestamp | { seconds: number } | Date | string | number
 
+// Converts Firestore Timestamp, serialized seconds, Date, or primitive date
+// values into the short date format used by the Recent Activity list.
 function formatShortDate(timestamp: TimestampValue): string {
   try {
     let date: Date;
@@ -147,6 +154,8 @@ const themes = {
   },
 }
 
+// Coordinates auth state, Firestore subscriptions, video actions, chat state,
+// theme persistence, and the landing or authenticated workspace UI.
 export default function ChestifyApp() {
   const [view, setView] = useState<"landing" | "app">("landing")
   const [activeTab, setActiveTab] = useState<TabType>("library")
@@ -166,6 +175,8 @@ export default function ChestifyApp() {
 
   const currentTheme = themes[activeTheme]
 
+  // Reads the saved theme key from localStorage and applies it when it matches
+  // one of the supported theme definitions.
   useEffect(() => {
     if (typeof window !== "undefined") {
       try {
@@ -179,6 +190,7 @@ export default function ChestifyApp() {
     }
   }, [])
 
+  // Writes the active theme key to localStorage whenever the user changes it.
   useEffect(() => {
     if (typeof window !== "undefined") {
       try {
@@ -189,6 +201,8 @@ export default function ChestifyApp() {
     }
   }, [activeTheme])
 
+  // Subscribes to Firebase Auth state changes, stores the current User, and
+  // switches from the landing view after a successful Google sign-in.
   useEffect(() => {
     return onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser)
@@ -199,6 +213,8 @@ export default function ChestifyApp() {
     })
   }, [])
 
+  // Builds a user-scoped Firestore query, listens for item updates in real
+  // time, and derives the three most recent entries for Recent Activity.
   useEffect(() => {
     if (!user) {
       setFirestoreItems([])
@@ -226,6 +242,8 @@ export default function ChestifyApp() {
     return () => unsubscribe()
   }, [user])
 
+  // Opens Firebase's Google popup provider and stores a readable error for the
+  // landing page if the authentication request is rejected.
   const handleSignIn = async () => {
     setAuthError(null)
     try {
@@ -236,6 +254,8 @@ export default function ChestifyApp() {
     }
   }
 
+  // Calls Firebase signOut, resets the view to the landing state, and reports
+  // failures through the shared authentication error message.
   const handleSignOut = async () => {
     try {
       await signOut(auth)
@@ -261,6 +281,8 @@ export default function ChestifyApp() {
       }
     : null
 
+  // Validates the URL input, delegates the authenticated Firestore write to
+  // addVideoToFirestore, and returns the user to the library tab.
   const handleAddVideo = async () => {
     if (!urlInput.trim()) return
     setIsAdding(true)
@@ -277,6 +299,8 @@ export default function ChestifyApp() {
     }
   }
 
+  // Appends the user's question, posts its saved-video context to the backend
+  // /chat endpoint, and appends either the AI response or an error message.
   const handleSendMessage = async () => {
     if (!chatInput.trim()) return
     
@@ -320,6 +344,8 @@ export default function ChestifyApp() {
     }
   }
 
+  // Prevents the card click from opening the video, formats its stored
+  // analysis as chat context, and opens the chat tab with an initial prompt.
   const handleOpenAIAnalysis = (e: React.MouseEvent, item: VideoItem) => {
     e.preventDefault()
     e.stopPropagation()
@@ -335,6 +361,7 @@ export default function ChestifyApp() {
     setActiveTab("chat")
   }
 
+  // Copies a predefined starter question into the controlled chat input.
   const handleStarterQuestion = (question: string) => {
     setChatInput(question)
   }

@@ -3,6 +3,11 @@ import type { Metadata } from "next"
 import { Geist, Geist_Mono } from "next/font/google"
 import "./globals.css"
 
+/*
+ * Owner: Chahatbir Singh
+ * Review focus: Root document layout, fonts, metadata, and application shell.
+ */
+
 const _geist = Geist({ subsets: ["latin"] })
 const _geistMono = Geist_Mono({ subsets: ["latin"] })
 
@@ -15,6 +20,8 @@ export const metadata: Metadata = {
   },
 }
 
+// Wraps route content in the HTML document, applies the language and font
+// classes, and supplies the shared metadata-defined application shell.
 export default function RootLayout({
   children,
 }: Readonly<{

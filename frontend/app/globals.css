@@ -1,3 +1,8 @@
+/*
+ * Owner: Chahatbir Singh
+ * Review focus: Global Tailwind imports, theme tokens, and shared application styles.
+ */
+
 @import "tailwindcss";
 @import "tw-animate-css";
 
