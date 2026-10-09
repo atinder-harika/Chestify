@@ -110,7 +110,7 @@ def process_item(item_ref, item_id: str, item_data: dict):
         if not url:
             raise ValueError("No URL provided")
         
-        logger.info(f"📹 Extracting video info from: {url}")
+        logger.info(f"Extracting video info from: {url}")
         
         video_info = extract_video_info(url)
         
@@ -121,7 +121,7 @@ def process_item(item_ref, item_id: str, item_data: dict):
             'transcript': video_info['transcript']
         })
         
-        logger.info(f"🤖 Analyzing content with AI: {video_info['title']}")
+        logger.info(f"Analyzing content with AI: {video_info['title']}")
         
         ai_result = analyze_content(
             title=video_info['title'],
@@ -158,14 +158,14 @@ def process_item(item_ref, item_id: str, item_data: dict):
         logger.info(f"✅ Item {item_id} processed successfully - Status: {ai_result.get('fact_check', {}).get('status')}")
         
     except VideoExtractionError as e:
-        logger.error(f"❌ Video extraction failed for {item_id}: {str(e)}")
+        logger.error(f"Video extraction failed for {item_id}: {str(e)}")
         item_ref.update({
             'status': 'error',
             'error_message': str(e)
         })
         
     except Exception as e:
-        logger.error(f"❌ Processing failed for {item_id}: {str(e)}")
+        logger.error(f"Processing failed for {item_id}: {str(e)}")
         item_ref.update({
             'status': 'error',
             'error_message': f"Processing error: {str(e)}"
