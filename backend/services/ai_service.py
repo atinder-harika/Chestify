@@ -123,7 +123,7 @@ The urgency_score (1-10) indicates how useful/important this content is for lear
         for attempt in range(max_retries):
             try:
                 response = client.models.generate_content(
-                    model="gemini-3.1-flash-lite",
+                    model="gemini-2.5-flash-lite",
                     contents=prompt,
                     config=config
                 )
