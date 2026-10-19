@@ -5,9 +5,13 @@ Owner: Christain Malan
 Review focus: Video metadata extraction, subtitle parsing, URL validation, and errors.
 """
 
-import yt_dlp
+import html
+import json
 import logging
-from typing import Any, Dict
+import re
+from typing import Any, Dict, Optional
+
+import yt_dlp
 
 logger = logging.getLogger(__name__)
 
@@ -50,8 +54,8 @@ def extract_video_info(url: str) -> Dict[str, Any]:
             duration = info.get('duration', 0)
             uploader = info.get('uploader', 'Unknown')
             
-            # Extract transcript from subtitles
-            transcript = extract_transcript(info)
+            # Download and parse the best English caption track
+            transcript = extract_transcript(ydl, info)
             
             # If no transcript, try description
             if not transcript:
@@ -86,39 +90,91 @@ def extract_video_info(url: str) -> Dict[str, Any]:
         raise VideoExtractionError(f"Extraction failed: {str(e)}")
 
 
-def extract_transcript(info: Dict) -> str:
+# Caption formats we know how to parse, in order of preference
+_CAPTION_FORMATS = ['json3', 'vtt', 'srv3', 'srv1', 'ttml']
+
+
+def _pick_caption_track(info: Dict) -> Optional[Dict]:
     """
-    Extract transcript from subtitles/captions
-    
-    Args:
-        info: Video info dictionary from yt-dlp
-    
+    Choose the best English caption track.
+
+    Manual subtitles beat auto-generated ones. Language keys vary by platform
+    (YouTube uses 'en' / 'en-US', TikTok uses 'eng-US'), so match any key
+    starting with 'en'.
+    """
+    for source in ('subtitles', 'automatic_captions'):
+        tracks_by_lang = info.get(source) or {}
+        langs = [lang for lang in tracks_by_lang if lang.lower().startswith('en')]
+        # Prefer exact/original English over translated variants like 'en-de'
+        langs.sort(key=lambda l: (l.lower() not in ('en', 'en-us', 'eng-us', 'en-orig'), len(l)))
+        for lang in langs:
+            tracks = tracks_by_lang[lang] or []
+            for fmt in _CAPTION_FORMATS:
+                for track in tracks:
+                    if track.get('ext') == fmt and track.get('url'):
+                        return track
+    return None
+
+
+def _parse_json3(text: str) -> str:
+    data = json.loads(text)
+    parts = []
+    for event in data.get('events', []):
+        for seg in event.get('segs') or []:
+            parts.append(seg.get('utf8', ''))
+    return ' '.join(parts)
+
+
+def _parse_vtt(text: str) -> str:
+    lines = []
+    for line in text.splitlines():
+        line = line.strip()
+        if (not line or line == 'WEBVTT' or '-->' in line or line.isdigit()
+                or line.startswith(('NOTE', 'STYLE', 'Kind:', 'Language:'))):
+            continue
+        line = re.sub(r'<[^>]+>', '', line)  # inline timing/styling tags
+        # Auto captions repeat the previous line as they scroll; skip repeats
+        if line and (not lines or lines[-1] != line):
+            lines.append(line)
+    return ' '.join(lines)
+
+
+def _parse_xml_captions(text: str) -> str:
+    text = re.sub(r'<[^>]+>', ' ', text)
+    return html.unescape(text)
+
+
+def extract_transcript(ydl: yt_dlp.YoutubeDL, info: Dict) -> str:
+    """
+    Download and parse the best English caption track for a video.
+
+    yt-dlp's extract_info only returns caption URLs, so the caption file is
+    fetched here through the same YoutubeDL instance (reusing its cookies,
+    proxy, and impersonation settings).
+
     Returns:
-        Concatenated transcript text
+        Transcript text, or an empty string when no usable captions exist
     """
-    transcript_parts = []
-    
-    # Prefer automatic captions because they are usually available for YouTube.
-    subtitles = info.get('automatic_captions', {})
-    
-    if not subtitles:
-        subtitles = info.get('subtitles', {})
-    
-    if 'en' in subtitles:
-        for subtitle in subtitles['en']:
-            if 'data' in subtitle:
-                transcript_parts.append(subtitle['data'])
-            elif subtitle.get('ext') == 'json3':
-                # JSON3 captions require a parser that is not currently enabled.
-                continue
-    
-    transcript = ' '.join(transcript_parts).strip()
-    
-    if transcript:
-        import re
-        transcript = re.sub(r'\[\d+:\d+\]', '', transcript)
-        transcript = re.sub(r'\s+', ' ', transcript).strip()
-    
+    track = _pick_caption_track(info)
+    if not track:
+        logger.info("No English captions available")
+        return ''
+
+    try:
+        raw = ydl.urlopen(track['url']).read().decode('utf-8', errors='replace')
+        ext = track.get('ext')
+        if ext == 'json3':
+            transcript = _parse_json3(raw)
+        elif ext == 'vtt':
+            transcript = _parse_vtt(raw)
+        else:
+            transcript = _parse_xml_captions(raw)
+    except Exception as e:
+        logger.warning(f"Could not download captions ({track.get('ext')}): {e}")
+        return ''
+
+    transcript = re.sub(r'\s+', ' ', transcript).strip()
+    logger.info(f"Transcript extracted ({len(transcript)} chars, {track.get('ext')})")
     return transcript
 
 
