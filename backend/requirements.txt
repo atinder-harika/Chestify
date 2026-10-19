@@ -66,4 +66,4 @@ urllib3==2.5.0
 uvicorn==0.32.0
 watchfiles==1.1.1
 websockets==15.0.1
-yt-dlp==2026.8.19
+yt-dlp[default,curl-cffi]>=2026.8.19

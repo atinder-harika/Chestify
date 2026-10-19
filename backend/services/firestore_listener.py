@@ -77,7 +77,7 @@ def _process_snapshot_changes(changes, collection_scope: str):
         if collection_scope == "user":
             user_ref = item_doc.reference.parent.parent
             if user_ref is None:
-                logger.error("Unable to determine user for item %s", item_doc.id)
+                logger.error(f"Unable to determine user for item {item_doc.id}")
                 continue
             user_id = user_ref.id
             item_key = f"{user_id}_{item_doc.id}"
@@ -89,9 +89,10 @@ def _process_snapshot_changes(changes, collection_scope: str):
 
         processed_items.add(item_key)
         if user_id:
-            logger.info("Found processing item %s for user %s", item_doc.id, user_id)
+            logger.info(f"Found processing item {item_doc.id} for user {user_id}")
         else:
-            logger.info("Found demo processing item %s", item_doc.id)
+            logger.info(f"Found demo processing item {item_doc.id}")
+        
         process_item(item_doc.reference, item_doc.id, item_data)
 
 
@@ -100,7 +101,7 @@ def process_item(item_ref, item_id: str, item_data: dict):
     Process a single item through the AI pipeline
     
     Args:
-        user_id: Firebase user ID
+        item_ref: Firestore document reference
         item_id: Item document ID
         item_data: Current item data
     """
@@ -110,7 +111,7 @@ def process_item(item_ref, item_id: str, item_data: dict):
         if not url:
             raise ValueError("No URL provided")
         
-        logger.info(f"📹 Extracting video info from: {url}")
+        logger.info(f"Extracting video info from: {url}")
         
         video_info = extract_video_info(url)
         
@@ -121,7 +122,7 @@ def process_item(item_ref, item_id: str, item_data: dict):
             'transcript': video_info['transcript']
         })
         
-        logger.info(f"🤖 Analyzing content with AI: {video_info['title']}")
+        logger.info(f"Analyzing content with AI: {video_info['title']}")
         
         ai_result = analyze_content(
             title=video_info['title'],
@@ -155,17 +156,17 @@ def process_item(item_ref, item_id: str, item_data: dict):
         
         item_ref.update(update_data)
         
-        logger.info(f"✅ Item {item_id} processed successfully - Status: {ai_result.get('fact_check', {}).get('status')}")
+        logger.info(f"Item {item_id} processed successfully - Status: {ai_result.get('fact_check', {}).get('status')}")
         
     except VideoExtractionError as e:
-        logger.error(f"❌ Video extraction failed for {item_id}: {str(e)}")
+        logger.error(f"Video extraction failed for {item_id}: {str(e)}")
         item_ref.update({
             'status': 'error',
             'error_message': str(e)
         })
         
     except Exception as e:
-        logger.error(f"❌ Processing failed for {item_id}: {str(e)}")
+        logger.error(f"Processing failed for {item_id}: {str(e)}")
         item_ref.update({
             'status': 'error',
             'error_message': f"Processing error: {str(e)}"
