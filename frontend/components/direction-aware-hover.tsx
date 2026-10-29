@@ -17,6 +17,7 @@ export const DirectionAwareHover = ({
   imageUrl,
   children,
   overlay,
+  revealed = false,
   childrenClassName,
   imageClassName,
   className,
@@ -25,6 +26,8 @@ export const DirectionAwareHover = ({
   children: React.ReactNode | string
   // Always-visible layer over the image (e.g. verdict marks); fades out on hover.
   overlay?: React.ReactNode
+  // Shows the hover state without a pointer, for tap-to-reveal on touch screens.
+  revealed?: boolean
   childrenClassName?: string
   imageClassName?: string
   className?: string
@@ -75,8 +78,19 @@ export const DirectionAwareHover = ({
       className={cn("bg-transparent rounded-lg overflow-hidden group/card relative isolate", className)}
     >
       <AnimatePresence mode="wait">
-        <motion.div className="relative h-full w-full" initial="initial" whileHover={direction} exit="exit">
-          <motion.div className="group-hover/card:block hidden absolute inset-0 w-full h-full bg-black/40 backdrop-blur-lg border border-white/10 z-10 transition duration-500" />
+        <motion.div
+          className="relative h-full w-full"
+          initial="initial"
+          animate={revealed ? "bottom" : "initial"}
+          whileHover={direction}
+          exit="exit"
+        >
+          <motion.div
+            className={cn(
+              "absolute inset-0 w-full h-full bg-black/40 backdrop-blur-lg border border-white/10 z-10 transition duration-500",
+              revealed ? "block" : "hidden group-hover/card:block",
+            )}
+          />
           <motion.div
             variants={variants}
             className="h-full w-full relative bg-gray-50 dark:bg-black"
@@ -99,14 +113,24 @@ export const DirectionAwareHover = ({
               duration: 0.5,
               ease: "easeOut",
             }}
-            className={cn("text-white absolute bottom-4 left-4 z-40 drop-shadow-md", childrenClassName)}
+            // Hidden details must not catch taps meant to reveal them.
+            className={cn(
+              "text-white absolute bottom-4 left-4 z-40 drop-shadow-md",
+              revealed ? "pointer-events-auto" : "pointer-events-none group-hover/card:pointer-events-auto",
+              childrenClassName,
+            )}
           >
             {children}
           </motion.div>
         </motion.div>
       </AnimatePresence>
       {overlay && (
-        <div className="pointer-events-none absolute inset-0 z-30 transition-opacity duration-300 group-hover/card:opacity-0">
+        <div
+          className={cn(
+            "pointer-events-none absolute inset-0 z-30 transition-opacity duration-300 group-hover/card:opacity-0",
+            revealed && "opacity-0",
+          )}
+        >
           {overlay}
         </div>
       )}

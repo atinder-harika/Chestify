@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { DirectionAwareHover } from "@/components/direction-aware-hover"
-import { CheckCircle2, AlertTriangle, Loader2, Send, Plus, Package, Clock, XCircle, HelpCircle, X, RotateCw } from "lucide-react"
+import { CheckCircle2, AlertTriangle, Loader2, Send, Plus, Package, Clock, XCircle, HelpCircle, X, RotateCw, ExternalLink } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { auth, db, googleProvider } from "@/lib/firebase/config"
 import { collection, doc, query, onSnapshot, orderBy, Timestamp, updateDoc } from "firebase/firestore"
@@ -331,6 +331,10 @@ export default function ChestifyApp() {
   const [chatInput, setChatInput] = useState("")
   const [messages, setMessages] = useState<Array<{ role: "user" | "assistant"; content: string }>>([])
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  // Touch screens can't hover, so a tap reveals a card's details instead of
+  // opening the video; the "Watch on ..." link inside opens it.
+  const [canHover, setCanHover] = useState(true)
+  const [revealedId, setRevealedId] = useState<string | null>(null)
   const [currentVideoContext, setCurrentVideoContext] = useState<string | null>(null)
   const [isDark, setIsDark] = useState(true)
   const [activeTheme, setActiveTheme] = useState<keyof typeof themes>("fire-ice")
@@ -355,6 +359,15 @@ export default function ChestifyApp() {
         console.error("Error loading theme:", error)
       }
     }
+  }, [])
+
+  // Tracks whether the primary pointer can hover (mouse) or not (touch).
+  useEffect(() => {
+    const media = window.matchMedia("(hover: hover) and (pointer: fine)")
+    const update = () => setCanHover(media.matches)
+    update()
+    media.addEventListener("change", update)
+    return () => media.removeEventListener("change", update)
   }, [])
 
   // Keeps the newest chat message in view inside the scrolling message list.
@@ -821,12 +834,17 @@ export default function ChestifyApp() {
                   return (
                   <div
                     key={item.id}
-                    onClick={() => window.open(item.url, '_blank')}
+                    onClick={() =>
+                      canHover
+                        ? window.open(item.url, "_blank")
+                        : setRevealedId((current) => (current === item.id ? null : item.id))
+                    }
                     className="block cursor-pointer"
                   >
                     <DirectionAwareHover
                       imageUrl={item.thumbnail || "/placeholder.svg"}
                       overlay={<VerdictOverlay state={state} score={item.accuracy_score} />}
+                      revealed={!canHover && revealedId === item.id}
                       className={cn(
                         "w-full aspect-[9/16] border transition-all duration-300",
                         meta && (isDark ? meta.cardDark : meta.cardLight),
@@ -839,9 +857,16 @@ export default function ChestifyApp() {
                     childrenClassName="inset-0 flex flex-col justify-between p-6"
                   >
                     <div className="flex items-start justify-between">
-                      <Badge className="backdrop-blur-sm text-xs bg-black/70 text-white/90 border-white/20">
-                        {item.url.includes("youtu") ? "YouTube Shorts" : item.url.includes("instagram") ? "Reels" : "TikTok"}
-                      </Badge>
+                      <a
+                        href={item.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        className="inline-flex items-center gap-1 rounded-full border border-white/20 bg-black/70 px-2.5 py-1 text-xs font-medium text-white/90 backdrop-blur-sm hover:bg-black/90"
+                      >
+                        Watch on {item.url.includes("youtu") ? "YouTube" : item.url.includes("instagram") ? "Instagram" : item.url.includes("x.com") || item.url.includes("twitter") ? "X" : item.url.includes("facebook") ? "Facebook" : "TikTok"}
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
                       <div>
                         {state !== "processing" && state !== "error" && (
                           <ScorePill state={state} score={item.accuracy_score} className="px-2.5 py-0.5 text-xs" />
