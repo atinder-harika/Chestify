@@ -9,6 +9,34 @@ https://chestify.atinder.dev that makes it *obvious* whether a video is true,
 half-true, or false, with good sources, and shows the full scope of the project.
 It doesn't need to be production-grade, but real test users must be able to use it.
 
+## Remote workflow (Atinder is away, checks only the live site from his phone)
+For every task, in this order:
+1. **Change:** make the change.
+2. **Check locally:**
+   - Frontend: `cd frontend; npx tsc --noEmit; npm run build`.
+   - Backend: `backend\venv\Scripts\python.exe -m py_compile` on every changed
+     file, plus offline checks of any changed logic with fake data.
+   - **No Gemini calls in dev.** The quota is about 3–4 grounded calls a day,
+     and Atinder does the real AI test once on the live site.
+3. **Firestore rules:** if the change adds or changes Firestore data that the
+   browser reads or writes, update `firestore.rules` in the same task and
+   deploy with `firebase deploy --only firestore:rules` (project
+   `datathon-db`, set in `.firebaserc`).
+4. **Ship:** commit (never with AI co-author lines) and push to `master`.
+5. **Wait and check deploys:**
+   - Pages: `gh run watch` for the "Deploy frontend to GitHub Pages" run.
+   - Railway: `railway logs` for the backend. Backend-only changes don't
+     trigger Pages.
+6. **Report:** send Atinder a short summary of what to test on
+   https://chestify.atinder.dev.
+7. **Stop:** don't start the next task until he replies "done".
+
+Tools on this PC:
+- `gh`: logged in as `atinder-harika`.
+- `firebase` and `railway` CLIs: installed globally with npm and logged in
+  once by Atinder. If either is logged out, ask him to rerun `firebase login`
+  or `railway login`.
+
 ## Hard rules
 - **No AI attribution in git.** Never add `Co-Authored-By: Claude`, `Copilot`,
   `Claude-Session`, or similar trailers to commits or PRs. AI contributors are
@@ -41,10 +69,9 @@ It doesn't need to be production-grade, but real test users must be able to use 
      (`verified` / `misleading` / `unverified` / `error`).
 - **Chat:** `POST /chat` in `main.py`, using `gemini-3.1-flash-lite` without
   grounding.
-- **Test the pipeline locally:**
-  `cd backend; venv\Scripts\activate; python tests/model_testing.py [url]`.
-  It shows which models allow grounding for the key, then runs the real
-  pipeline on one URL.
+- **Don't run `tests/model_testing.py`.** It was a one-time check of which
+  models allow grounding (only `gemini-2.5-flash` does), and it spends about
+  6 grounded calls per run.
 
 ## Gemini model facts (checked Oct 2026, this key/project)
 | Model | Grounded search |
@@ -195,6 +222,18 @@ It doesn't need to be production-grade, but real test users must be able to use 
 - YouTube from Railway can hit "Sign in to confirm you're not a bot"
   (datacenter IP). TikTok works. A residential proxy env var for yt-dlp is
   the fallback if YouTube must work publicly.
+
+### 6. Final polishing (low priority, after the features above)
+- **Sources for absence-of-evidence verdicts:** for fabricated claims (e.g. the
+  Beyoncé donation hoax, scored 2/10), Gemini cited pages about *other*
+  donations as "contradicting" sources, though none address the claim.
+  No extra Gemini calls are needed for either fix:
+  - Have the prompt search fact-checkers first (Lead Stories, Snopes,
+    Reuters, AP, PolitiFact) for the exact claim, and cite a direct debunk
+    when one exists.
+  - Add a third group, `sources_context` ("Related context"), for pages
+    that don't address the claim, and have the one-liner say e.g. "No
+    credible outlet reports this donation".
 
 ## Purpose to keep in mind
 Make it obvious and useful: tell **lies, half-truths, and truths** apart at a
