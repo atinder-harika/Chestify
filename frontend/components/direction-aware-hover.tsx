@@ -16,12 +16,15 @@ import { cn } from "@/lib/utils"
 export const DirectionAwareHover = ({
   imageUrl,
   children,
+  overlay,
   childrenClassName,
   imageClassName,
   className,
 }: {
   imageUrl: string
   children: React.ReactNode | string
+  // Always-visible layer over the image (e.g. verdict marks); fades out on hover.
+  overlay?: React.ReactNode
   childrenClassName?: string
   imageClassName?: string
   className?: string
@@ -69,7 +72,7 @@ export const DirectionAwareHover = ({
     <motion.div
       onMouseEnter={handleMouseEnter}
       ref={ref}
-      className={cn("bg-transparent rounded-lg overflow-hidden group/card relative", className)}
+      className={cn("bg-transparent rounded-lg overflow-hidden group/card relative isolate", className)}
     >
       <AnimatePresence mode="wait">
         <motion.div className="relative h-full w-full" initial="initial" whileHover={direction} exit="exit">
@@ -102,6 +105,11 @@ export const DirectionAwareHover = ({
           </motion.div>
         </motion.div>
       </AnimatePresence>
+      {overlay && (
+        <div className="pointer-events-none absolute inset-0 z-30 transition-opacity duration-300 group-hover/card:opacity-0">
+          {overlay}
+        </div>
+      )}
     </motion.div>
   )
 }

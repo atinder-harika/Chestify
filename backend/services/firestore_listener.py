@@ -10,12 +10,22 @@ import threading
 from google.cloud.firestore_v1 import FieldFilter
 from config.firebase_config import get_firestore_client
 from services.video_service import extract_video_info, VideoExtractionError
-from services.ai_service import analyze_content
+from services.ai_service import analyze_content, AIAnalysisError
 
 logger = logging.getLogger(__name__)
 
+# Keys of items currently being processed. A key is removed when its item
+# finishes, so an item set back to 'processing' (retry) runs again.
 processed_items = set()
 listener_status = "inactive"
+
+# Firestore status shown by the UI for each verdict band.
+VERDICT_STATUS = {
+    "true": "verified",
+    "half_truth": "misleading",
+    "false": "false",
+    "unverified": "unverified",
+}
 
 
 def start_firestore_listener():
@@ -41,13 +51,9 @@ def listen_to_firestore():
         items_query = db.collection_group('items').where(
             filter=FieldFilter('status', '==', 'processing')
         )
-        demo_query = db.collection('demo_items').where(
-            filter=FieldFilter('status', '==', 'processing')
-        )
         items_query.on_snapshot(on_processing_snapshot)
-        demo_query.on_snapshot(on_demo_snapshot)
         listener_status = "active"
-        logger.info("Firestore processing listeners registered")
+        logger.info("Firestore processing listener registered")
 
         threading.Event().wait()
     except Exception:
@@ -56,50 +62,41 @@ def listen_to_firestore():
 
 
 def on_processing_snapshot(col_snapshot, changes, read_time):
-    """Process user-scoped documents requiring analysis."""
-    _process_snapshot_changes(changes, "user")
-
-
-def on_demo_snapshot(col_snapshot, changes, read_time):
-    """Process shared demo documents requiring analysis."""
-    _process_snapshot_changes(changes, "demo")
-
-
-def _process_snapshot_changes(changes, collection_scope: str):
     """Filter processing changes, deduplicate them, and start the pipeline."""
     for change in changes:
         item_doc = change.document
-        item_data = item_doc.to_dict()
+        item_data = item_doc.to_dict() or {}
         if item_data.get('status') != 'processing':
             continue
 
-        user_id = None
-        if collection_scope == "user":
-            user_ref = item_doc.reference.parent.parent
-            if user_ref is None:
-                logger.error(f"Unable to determine user for item {item_doc.id}")
-                continue
-            user_id = user_ref.id
-            item_key = f"{user_id}_{item_doc.id}"
-        else:
-            item_key = f"demo_{item_doc.id}"
+        user_ref = item_doc.reference.parent.parent
+        if user_ref is None:
+            logger.error(f"Unable to determine user for item {item_doc.id}")
+            continue
+        user_id = user_ref.id
+        item_key = f"{user_id}_{item_doc.id}"
 
         if item_key in processed_items:
             continue
 
+        # Snapshots can arrive late (e.g. our own mid-pipeline update). Re-read
+        # so a finished item is never analyzed twice.
+        fresh = item_doc.reference.get()
+        if not fresh.exists or (fresh.to_dict() or {}).get('status') != 'processing':
+            continue
+
         processed_items.add(item_key)
-        if user_id:
-            logger.info(f"Found processing item {item_doc.id} for user {user_id}")
-        else:
-            logger.info(f"Found demo processing item {item_doc.id}")
-        
-        process_item(item_doc.reference, item_doc.id, item_data)
+        logger.info(f"Found processing item {item_doc.id} for user {user_id}")
+        try:
+            process_item(item_doc.reference, item_doc.id, fresh.to_dict())
+        finally:
+            processed_items.discard(item_key)
 
 
 def process_item(item_ref, item_id: str, item_data: dict):
     """
     Process a single item through the AI pipeline
-    
+
     Args:
         item_ref: Firestore document reference
         item_id: Item document ID
@@ -107,64 +104,57 @@ def process_item(item_ref, item_id: str, item_data: dict):
     """
     try:
         url = item_data.get('url')
-        
+
         if not url:
             raise ValueError("No URL provided")
-        
+
         logger.info(f"Extracting video info from: {url}")
-        
+
         video_info = extract_video_info(url)
-        
+
         # Update with video info
         item_ref.update({
             'title': video_info['title'],
             'thumbnail': video_info['thumbnail'],
             'transcript': video_info['transcript']
         })
-        
+
         logger.info(f"Analyzing content with AI: {video_info['title']}")
-        
+
         ai_result = analyze_content(
             title=video_info['title'],
             transcript=video_info['transcript'],
             url=url
         )
-        
-        fact_check_status = ai_result.get('fact_check', {}).get('status', 'Unverified')
-        
-        if fact_check_status == 'Verified':
-            ui_status = 'verified'
-        elif fact_check_status in ['False', 'Questionable']:
-            ui_status = 'misleading'
-        else:
-            ui_status = 'unverified'
-        
+
         update_data = {
-            'summary': ai_result.get('summary', ''),
-            'category': ai_result.get('category', 'Other'),
-            'tags': ai_result.get('tags', []),
-            'fact_check': ai_result.get('fact_check', {
-                'status': 'Unverified',
-                'reason': 'Analysis incomplete',
-                'source_link': ''
-            }),
-            'sources': ai_result.get('sources', []),
-            'urgency_score': ai_result.get('urgency_score', 5),
-            'status': ui_status,
-            'error_message': ''
+            **ai_result,
+            'status': VERDICT_STATUS[ai_result['verdict']],
+            'error_message': '',
+            'placeholder': False
         }
-        
+
         item_ref.update(update_data)
-        
-        logger.info(f"Item {item_id} processed successfully - Status: {ai_result.get('fact_check', {}).get('status')}")
-        
+
+        logger.info(
+            f"Item {item_id} processed successfully - "
+            f"{ai_result['verdict']} ({ai_result['accuracy_score']}/10)"
+        )
+
     except VideoExtractionError as e:
         logger.error(f"Video extraction failed for {item_id}: {str(e)}")
         item_ref.update({
             'status': 'error',
             'error_message': str(e)
         })
-        
+
+    except AIAnalysisError as e:
+        logger.error(f"AI analysis failed for {item_id}: {str(e)}")
+        item_ref.update({
+            'status': 'error',
+            'error_message': str(e)
+        })
+
     except Exception as e:
         logger.error(f"Processing failed for {item_id}: {str(e)}")
         item_ref.update({

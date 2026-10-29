@@ -11,10 +11,10 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { DirectionAwareHover } from "@/components/direction-aware-hover"
-import { CheckCircle2, AlertTriangle, Loader2, Send, Plus, Package, Clock, XCircle } from "lucide-react"
+import { CheckCircle2, AlertTriangle, Loader2, Send, Plus, Package, Clock, XCircle, HelpCircle, X, RotateCw } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { auth, db, googleProvider } from "@/lib/firebase/config"
-import { collection, query, onSnapshot, orderBy, Timestamp } from "firebase/firestore"
+import { collection, doc, query, onSnapshot, orderBy, Timestamp, updateDoc } from "firebase/firestore"
 import { onAuthStateChanged, signInWithPopup, signOut, type User } from "firebase/auth"
 import { addVideoToFirestore } from "@/lib/firestore-helpers"
 import { ThemeControls } from "@/components/theme-controls"
@@ -47,15 +47,24 @@ function formatShortDate(timestamp: TimestampValue): string {
 }
 
 type TabType = "library" | "add" | "chat"
-type FilterType = "all" | "verified" | "misleading" | "processing"
+
+type VideoStatus = "processing" | "verified" | "misleading" | "false" | "unverified" | "error"
+type Verdict = "true" | "half_truth" | "false" | "unverified"
+type DisplayState = Verdict | "processing" | "error"
+type FilterType = "all" | Verdict | "processing"
 
 type RecentActivity = {
   url: string
-  status: "processing" | "verified" | "misleading" | "failed"
+  state: DisplayState
   timestamp: string
 }
 
-type VideoStatus = "processing" | "verified" | "misleading" | "unverified" | "error"
+type CitedSource = {
+  title: string
+  domain: string
+  url: string
+  point?: string
+}
 
 type VideoItem = {
   id: string
@@ -68,11 +77,167 @@ type VideoItem = {
   status: VideoStatus
   error_message?: string
   created_at?: TimestampValue
+  accuracy_score?: number | null
+  score_reason?: string
+  verdict?: Verdict
+  one_line_summary?: string
+  highlight?: string
+  main_false_claim?: string
+  conclusion?: string
+  trust_note?: string
+  sources_for?: CitedSource[]
+  sources_against?: CitedSource[]
+  sources?: CitedSource[]
   fact_check?: {
     status?: string
     reason?: string
     source_link?: string
   }
+}
+
+// Resolves what a card should show. New items carry `verdict`; older items
+// only have the legacy status + fact_check.status, which map onto the bands.
+function getDisplayState(item: VideoItem): DisplayState {
+  if (item.status === "processing" || item.status === "error") return item.status
+  if (item.verdict) return item.verdict
+  if (item.status === "verified") return "true"
+  if (item.status === "false" || item.fact_check?.status === "False") return "false"
+  if (item.status === "misleading") return "half_truth"
+  return "unverified"
+}
+
+// Colors per verdict: green = true, yellow = half-truth, red = false, grey = unverified.
+const VERDICT_META: Record<
+  Verdict,
+  {
+    label: string
+    filterLabel: string
+    icon: string
+    pill: string
+    dot: string
+    cardDark: string
+    cardLight: string
+    box: string
+    boxText: string
+    highlight: string
+    link: string
+    button: string
+  }
+> = {
+  true: {
+    label: "✓ MOSTLY TRUE",
+    filterLabel: "True",
+    icon: "text-emerald-400",
+    pill: "bg-emerald-500 text-white",
+    dot: "bg-emerald-400",
+    cardDark: "border-emerald-500/30 hover:border-emerald-500/60 hover:shadow-[0_20px_50px_-12px_rgba(16,185,129,0.4)]",
+    cardLight: "border-emerald-300 hover:border-emerald-400 hover:shadow-[0_20px_50px_-12px_rgba(16,185,129,0.3)]",
+    box: "bg-emerald-500/20 border-emerald-400/40",
+    boxText: "text-emerald-300",
+    highlight: "text-emerald-300",
+    link: "text-emerald-300 hover:text-emerald-200",
+    button: "bg-emerald-500/30 text-emerald-200 hover:bg-emerald-500/40 border-emerald-400/40",
+  },
+  half_truth: {
+    label: "⚠ HALF-TRUTH",
+    filterLabel: "Half-truth",
+    icon: "text-yellow-400",
+    pill: "bg-yellow-400 text-black",
+    dot: "bg-yellow-400",
+    cardDark: "border-yellow-500/40 hover:border-yellow-500/70 hover:shadow-[0_20px_50px_-12px_rgba(234,179,8,0.4)]",
+    cardLight: "border-yellow-300 hover:border-yellow-400 hover:shadow-[0_20px_50px_-12px_rgba(234,179,8,0.3)]",
+    box: "bg-yellow-500/20 border-yellow-400/40",
+    boxText: "text-yellow-300",
+    highlight: "text-yellow-300",
+    link: "text-yellow-300 hover:text-yellow-200",
+    button: "bg-yellow-500/30 text-yellow-200 hover:bg-yellow-500/40 border-yellow-400/40",
+  },
+  false: {
+    label: "✕ FALSE",
+    filterLabel: "False",
+    icon: "text-red-500",
+    pill: "bg-red-600 text-white",
+    dot: "bg-red-500",
+    cardDark: "border-red-500/40 hover:border-red-500/70 hover:shadow-[0_20px_50px_-12px_rgba(239,68,68,0.4)]",
+    cardLight: "border-red-300 hover:border-red-400 hover:shadow-[0_20px_50px_-12px_rgba(239,68,68,0.3)]",
+    box: "bg-red-500/20 border-red-400/40",
+    boxText: "text-red-300",
+    highlight: "text-red-400",
+    link: "text-red-300 hover:text-red-200",
+    button: "bg-red-500/30 text-red-200 hover:bg-red-500/40 border-red-400/40",
+  },
+  unverified: {
+    label: "? UNVERIFIED",
+    filterLabel: "Unverified",
+    icon: "text-zinc-400",
+    pill: "bg-zinc-500 text-white",
+    dot: "bg-zinc-400",
+    cardDark: "border-zinc-500/30 hover:border-zinc-400/60 hover:shadow-[0_20px_50px_-12px_rgba(161,161,170,0.3)]",
+    cardLight: "border-zinc-300 hover:border-zinc-400 hover:shadow-[0_20px_50px_-12px_rgba(161,161,170,0.3)]",
+    box: "bg-zinc-500/20 border-zinc-400/40",
+    boxText: "text-zinc-300",
+    highlight: "text-white",
+    link: "text-zinc-300 hover:text-zinc-200",
+    button: "bg-zinc-500/30 text-zinc-200 hover:bg-zinc-500/40 border-zinc-400/40",
+  },
+}
+
+const FILTERS: FilterType[] = ["all", "true", "half_truth", "false", "unverified", "processing"]
+
+function filterLabel(filter: FilterType): string {
+  if (filter === "all") return "All"
+  if (filter === "processing") return "Processing"
+  return VERDICT_META[filter].filterLabel
+}
+
+// Renders text with the first case-insensitive match of `highlight` bolded in
+// the verdict color, e.g. "...donated $3.5M to **his own charity**".
+function HighlightedText({ text, highlight, className }: { text: string; highlight?: string; className: string }) {
+  const index = highlight ? text.toLowerCase().indexOf(highlight.toLowerCase()) : -1
+  if (!highlight || index === -1) return <>{text}</>
+  return (
+    <>
+      {text.slice(0, index)}
+      <span className={cn("font-bold", className)}>{text.slice(index, index + highlight.length)}</span>
+      {text.slice(index + highlight.length)}
+    </>
+  )
+}
+
+// Shown on the thumbnail until hover so the verdict reads at a glance: red X,
+// yellow warning, green check, or grey question mark, plus the score.
+function VerdictOverlay({ state, score }: { state: DisplayState; score?: number | null }) {
+  if (state === "processing" || state === "error") return null
+  const meta = VERDICT_META[state]
+  const iconClass = cn("drop-shadow-[0_4px_12px_rgba(0,0,0,0.8)]", meta.icon)
+  return (
+    <div className={cn("absolute inset-0 flex items-center justify-center", state === "false" && "bg-red-950/30")}>
+      {state === "false" && <X className={cn("w-2/3 h-2/3", iconClass)} strokeWidth={3} />}
+      {state === "half_truth" && <AlertTriangle className={cn("w-2/5 h-2/5", iconClass)} strokeWidth={2.5} />}
+      {state === "true" && <CheckCircle2 className={cn("w-2/5 h-2/5", iconClass)} strokeWidth={2.5} />}
+      {state === "unverified" && <HelpCircle className={cn("w-1/3 h-1/3 opacity-80", iconClass)} strokeWidth={2} />}
+      <ScorePill state={state} score={score} className="absolute top-4 right-4 px-3 py-1 text-sm shadow-lg" />
+    </div>
+  )
+}
+
+// Score badge in the verdict color; unscored items show a grey "N/A".
+function ScorePill({ state, score, className }: { state: Verdict; score?: number | null; className?: string }) {
+  const scored = typeof score === "number"
+  return (
+    <span className={cn("rounded-full font-bold", scored ? VERDICT_META[state].pill : VERDICT_META.unverified.pill, className)}>
+      {scored ? `${score}/10` : "N/A"}
+    </span>
+  )
+}
+
+// Up to three citations for the card: contradicting first, then supporting,
+// then (for older items) the raw grounding results.
+function cardSources(item: VideoItem): CitedSource[] {
+  const seen = new Set<string>()
+  return [...(item.sources_against || []), ...(item.sources_for || []), ...(item.sources || [])]
+    .filter((s) => s.url && !seen.has(s.url) && seen.add(s.url))
+    .slice(0, 3)
 }
 
 const themes = {
@@ -234,7 +399,7 @@ export default function ChestifyApp() {
       
       const recent: RecentActivity[] = items.slice(0, 3).map((item) => ({
         url: item.url,
-        status: item.status === 'verified' || item.status === 'misleading' ? item.status : 'processing',
+        state: getDisplayState(item),
         timestamp: item.created_at ? formatShortDate(item.created_at) : 'Just now'
       }))
       setRecentActivity(recent)
@@ -347,11 +512,48 @@ export default function ChestifyApp() {
 
   // Prevents the card click from opening the video, formats its stored
   // analysis as chat context, and opens the chat tab with an initial prompt.
+  // Sends the item back to 'processing' so the backend listener re-runs the
+  // fact-check. Asks first because each run spends limited daily AI quota.
+  const handleRecheck = async (e: React.MouseEvent, item: VideoItem) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (!user) return
+    if (!window.confirm("Recheck uses one AI fact-check (limited per day). Continue?")) return
+
+    try {
+      await updateDoc(doc(db, "users", user.uid, "items", item.id), {
+        status: "processing",
+        error_message: "",
+      })
+    } catch (error) {
+      console.error("Recheck failed:", error)
+      alert("Couldn't start the recheck. Please try again.")
+    }
+  }
+
   const handleOpenAIAnalysis = (e: React.MouseEvent, item: VideoItem) => {
     e.preventDefault()
     e.stopPropagation()
     
-    const context = `Title: ${item.title}\nSummary: ${item.summary}\nFact Check: ${item.fact_check?.reason || "N/A"}\nStatus: ${item.status}`
+    const state = getDisplayState(item)
+    const sourceLines = [...(item.sources_against || []), ...(item.sources_for || [])]
+      .map((s) => `- ${s.domain}: ${s.point || s.title} (${s.url})`)
+      .join("\n")
+    const context = [
+      `Title: ${item.title}`,
+      `URL: ${item.url}`,
+      `Summary: ${item.summary}`,
+      `Verdict: ${state === "processing" || state === "error" ? state : VERDICT_META[state].label}`,
+      `Accuracy score: ${typeof item.accuracy_score === "number" ? `${item.accuracy_score}/10` : "not scored"}`,
+      item.score_reason && `Score reason: ${item.score_reason}`,
+      item.one_line_summary && `What's actually true: ${item.one_line_summary}`,
+      item.main_false_claim && `Most incorrect claim: ${item.main_false_claim}`,
+      `Conclusion: ${item.conclusion || item.fact_check?.reason || "N/A"}`,
+      item.trust_note && `Which side to trust: ${item.trust_note}`,
+      sourceLines && `Sources:\n${sourceLines}`,
+    ]
+      .filter(Boolean)
+      .join("\n")
     setCurrentVideoContext(context)
     
     setMessages([{
@@ -369,14 +571,7 @@ export default function ChestifyApp() {
 
   const allItems = firestoreItems
   
-  const filteredItems = allItems.filter((item) => {
-    if (filter === "all") return true
-    if (filter === item.status.toLowerCase()) return true
-    if (filter === "verified" && item.fact_check?.status === "Verified") return true
-    if (filter === "misleading" && (item.fact_check?.status === "False" || item.fact_check?.status === "Questionable")) return true
-    if (filter === "processing" && item.status === "processing") return true
-    return false
-  })
+  const filteredItems = allItems.filter((item) => filter === "all" || getDisplayState(item) === filter)
 
   if (authLoading) {
     return (
@@ -585,28 +780,39 @@ export default function ChestifyApp() {
                   Browse your fact-checked video collection
                 </p>
 
-                <div className="flex gap-2 mb-6">
-                  {["All", "Verified", "Misleading", "Processing"].map((filterOption) => (
+                <div className="flex flex-wrap gap-2 mb-6">
+                  {FILTERS.map((filterOption) => (
                     <button
                       key={filterOption}
-                      onClick={() => setFilter(filterOption.toLowerCase() as FilterType)}
+                      onClick={() => setFilter(filterOption)}
                       className={cn(
                         "px-4 py-2 rounded-full text-sm font-medium transition-all duration-300",
-                        filter === filterOption.toLowerCase()
+                        filter === filterOption
                           ? `bg-gradient-to-r ${currentTheme.filterActive} text-black`
                           : isDark
                             ? "bg-white/5 text-white/60 hover:bg-white/10 border border-white/10"
                             : "bg-neutral-100 text-neutral-600 hover:bg-neutral-200 border border-neutral-200",
                       )}
                     >
-                      {filterOption}
+                      {filterOption !== "all" && filterOption !== "processing" && (
+                        <span
+                          className={cn("inline-block w-2 h-2 rounded-full mr-2", VERDICT_META[filterOption].dot)}
+                        />
+                      )}
+                      {filterLabel(filterOption)}
                     </button>
                   ))}
                 </div>
               </div>
 
               <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-                {filteredItems.map((item) => (
+                {filteredItems.map((item) => {
+                  const state = getDisplayState(item)
+                  const meta = state === "processing" || state === "error" ? null : VERDICT_META[state]
+                  const oneLine = item.one_line_summary || item.fact_check?.reason || ""
+                  const sources = cardSources(item)
+
+                  return (
                   <div
                     key={item.id}
                     onClick={() => window.open(item.url, '_blank')}
@@ -614,42 +820,39 @@ export default function ChestifyApp() {
                   >
                     <DirectionAwareHover
                       imageUrl={item.thumbnail || "/placeholder.svg"}
+                      overlay={<VerdictOverlay state={state} score={item.accuracy_score} />}
                       className={cn(
                         "w-full aspect-[9/16] border transition-all duration-300",
-                      item.status === "verified" &&
-                        (isDark
-                          ? "border-cyan-500/30 hover:border-cyan-500/60 hover:shadow-[0_20px_50px_-12px_rgba(6,182,212,0.4)]"
-                          : "border-teal-300 hover:border-teal-400 hover:shadow-[0_20px_50px_-12px_rgba(20,184,166,0.3)]"),
-                      item.status === "misleading" &&
-                        (isDark
-                          ? "border-orange-500/50 hover:border-orange-500/80 hover:shadow-[0_20px_50px_-12px_rgba(249,115,22,0.4)]"
-                          : "border-orange-300 hover:border-orange-400 hover:shadow-[0_20px_50px_-12px_rgba(251,146,60,0.3)]"),
-                      item.status === "processing" &&
-                        (isDark
-                          ? "border-purple-400/30 hover:border-purple-400/60 hover:shadow-[0_20px_50px_-12px_rgba(168,85,247,0.4)]"
-                          : "border-purple-300 hover:border-purple-400 hover:shadow-[0_20px_50px_-12px_rgba(168,85,247,0.3)]"),
+                        meta && (isDark ? meta.cardDark : meta.cardLight),
+                        state === "processing" &&
+                          (isDark
+                            ? "border-purple-400/30 hover:border-purple-400/60 hover:shadow-[0_20px_50px_-12px_rgba(168,85,247,0.4)]"
+                            : "border-purple-300 hover:border-purple-400 hover:shadow-[0_20px_50px_-12px_rgba(168,85,247,0.3)]"),
+                        state === "error" && (isDark ? "border-zinc-500/30" : "border-zinc-300"),
                     )}
                     childrenClassName="inset-0 flex flex-col justify-between p-6"
                   >
                     <div className="flex items-start justify-between">
                       <Badge className="backdrop-blur-sm text-xs bg-black/70 text-white/90 border-white/20">
-                        {item.url.includes("youtube") ? "YouTube Shorts" : "TikTok"}
+                        {item.url.includes("youtu") ? "YouTube Shorts" : item.url.includes("instagram") ? "Reels" : "TikTok"}
                       </Badge>
                       <div>
-                        {item.status === "verified" && <CheckCircle2 className="w-5 h-5 text-cyan-400" />}
-                        {item.status === "misleading" && <AlertTriangle className="w-5 h-5 text-orange-400" />}
-                        {item.status === "unverified" && <AlertTriangle className="w-5 h-5 text-yellow-400" />}
-                        {item.status === "processing" && <Loader2 className="w-5 h-5 animate-spin text-purple-400" />}
-                        {item.status === "error" && <XCircle className="w-5 h-5 text-red-400" />}
+                        {state !== "processing" && state !== "error" && (
+                          <ScorePill state={state} score={item.accuracy_score} className="px-2.5 py-0.5 text-xs" />
+                        )}
+                        {state === "processing" && <Loader2 className="w-5 h-5 animate-spin text-purple-400" />}
+                        {state === "error" && <XCircle className="w-5 h-5 text-zinc-400" />}
                       </div>
                     </div>
 
                     <div className="space-y-3">
                       <div>
-                        <Badge variant="outline" className="text-xs border-white/30 text-white/70 mb-2">
-                          {item.category}
-                        </Badge>
-                        <h3 className="text-lg font-semibold text-white mb-2">{item.title}</h3>
+                        {item.category && (
+                          <Badge variant="outline" className="text-xs border-white/30 text-white/70 mb-2">
+                            {item.category}
+                          </Badge>
+                        )}
+                        <h3 className="text-lg font-semibold text-white mb-2 line-clamp-2">{item.title}</h3>
                       </div>
 
                       <div className="flex flex-wrap gap-2">
@@ -660,81 +863,81 @@ export default function ChestifyApp() {
                         ))}
                       </div>
 
-                      {item.status === "processing" ? (
+                      {state === "processing" ? (
                         <div className="space-y-2">
                           <div className="h-3 rounded animate-pulse bg-white/20" />
                           <div className="h-3 rounded animate-pulse w-3/4 bg-white/20" />
                         </div>
-                      ) : item.status === "error" ? (
+                      ) : state === "error" || !meta ? (
                         <div className="space-y-2">
-                          <p className="text-sm font-semibold text-red-300">Analysis unavailable</p>
+                          <p className="text-sm font-semibold text-zinc-300">Analysis unavailable</p>
                           <p className="text-xs text-white/80">
-                            {item.error_message || item.fact_check?.reason || "Please try again later."}
+                            {item.error_message || "Please try again later."}
                           </p>
-                        </div>
-                      ) : item.status === "unverified" ? (
-                        <div className="space-y-3">
-                          <div className="p-3 rounded-lg border bg-yellow-500/20 border-yellow-400/40">
-                            <p className="text-xs font-semibold text-yellow-300 mb-1">? UNVERIFIED</p>
-                            <p className="text-xs text-white/90">{item.fact_check?.reason || "No external sources were checked."}</p>
-                          </div>
-                          <p className="text-sm text-white/80">{item.summary}</p>
+                          <Button
+                            size="sm"
+                            onClick={(e) => handleRecheck(e, item)}
+                            className="w-full rounded-full text-xs border bg-zinc-500/30 text-zinc-200 hover:bg-zinc-500/40 border-zinc-400/40"
+                          >
+                            <RotateCw className="w-3 h-3 mr-1" />
+                            Retry
+                          </Button>
                         </div>
                       ) : (
                         <div className="space-y-3">
-                          <div
-                            className={cn(
-                              "p-3 rounded-lg border backdrop-blur-sm",
-                              item.status === "verified"
-                                ? "bg-cyan-500/20 border-cyan-400/40"
-                                : "bg-orange-500/20 border-orange-400/40",
-                            )}
-                          >
-                            <p
-                              className={cn(
-                                "text-xs font-semibold mb-1",
-                                item.status === "verified" ? "text-cyan-300" : "text-orange-300",
-                              )}
-                            >
-                              {item.status === "verified" ? "✓ VERIFIED" : "⚠ MISLEADING"}
+                          <div className={cn("p-3 rounded-lg border backdrop-blur-sm", meta.box)}>
+                            <p className={cn("text-xs font-semibold mb-1", meta.boxText)}>
+                              {meta.label}
                             </p>
-                            <p className="text-xs text-white/90 mb-2">{item.fact_check?.reason}</p>
-                            {item.fact_check?.source_link ? (
-                              <a
-                                href={item.fact_check.source_link}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                onClick={(e) => e.stopPropagation()}
-                                className={cn(
-                                  "text-xs underline block",
-                                  item.status === "verified" ? "text-cyan-300 hover:text-cyan-200" : "text-orange-300 hover:text-orange-200",
-                                )}
-                              >
-                                Source
-                              </a>
+                            <p className={cn("text-sm text-white/90 mb-2 leading-snug", !item.one_line_summary && "text-xs line-clamp-3")}>
+                              <HighlightedText text={oneLine} highlight={item.highlight} className={meta.highlight} />
+                            </p>
+                            {sources.length ? (
+                              <div className="flex flex-wrap gap-x-3 gap-y-1">
+                                {sources.map((source) => (
+                                  <a
+                                    key={source.url}
+                                    href={source.url}
+                                    title={source.point || source.title}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    onClick={(e) => e.stopPropagation()}
+                                    className={cn("text-xs underline", meta.link)}
+                                  >
+                                    {source.domain || source.title}
+                                  </a>
+                                ))}
+                              </div>
                             ) : (
                               <p className="text-xs text-white/60 italic">Couldn't find sources</p>
                             )}
                           </div>
 
-                          <Button
-                            size="sm"
-                            onClick={(e) => handleOpenAIAnalysis(e, item)}
-                            className={cn(
-                              "w-full rounded-full text-xs border",
-                              item.status === "verified"
-                                ? "bg-cyan-500/30 text-cyan-200 hover:bg-cyan-500/40 border-cyan-400/40"
-                                : "bg-orange-500/30 text-orange-200 hover:bg-orange-500/40 border-orange-400/40"
-                            )}
-                          >
-                            AI Analysis
-                          </Button>
+                          <div className="flex gap-2">
+                            <Button
+                              size="sm"
+                              onClick={(e) => handleOpenAIAnalysis(e, item)}
+                              className={cn("flex-1 rounded-full text-xs border", meta.button)}
+                            >
+                              AI Analysis
+                            </Button>
+                            <Button
+                              size="sm"
+                              title="Re-run the fact-check"
+                              onClick={(e) => handleRecheck(e, item)}
+                              className={cn("rounded-full text-xs border", meta.button)}
+                            >
+                              <RotateCw className="w-3 h-3 mr-1" />
+                              Recheck
+                            </Button>
+                          </div>
                         </div>
                       )}
                     </div>
                   </DirectionAwareHover>
                   </div>
-                ))}
+                  )
+                })}
               </div>
             </div>
           )}
@@ -815,12 +1018,19 @@ export default function ChestifyApp() {
                       )}
                     >
                       <div className="flex items-center gap-3 flex-1 min-w-0">
-                        {activity.status === "verified" && (
-                          <CheckCircle2
-                            className={cn("w-4 h-4 flex-shrink-0", isDark ? "text-cyan-400" : "text-teal-600")}
-                          />
+                        {activity.state === "true" && (
+                          <CheckCircle2 className={cn("w-4 h-4 flex-shrink-0", isDark ? "text-emerald-400" : "text-emerald-600")} />
                         )}
-                        {activity.status === "processing" && (
+                        {activity.state === "half_truth" && (
+                          <AlertTriangle className={cn("w-4 h-4 flex-shrink-0", isDark ? "text-yellow-400" : "text-yellow-600")} />
+                        )}
+                        {activity.state === "false" && (
+                          <XCircle className={cn("w-4 h-4 flex-shrink-0", isDark ? "text-red-500" : "text-red-600")} />
+                        )}
+                        {activity.state === "unverified" && (
+                          <HelpCircle className="w-4 h-4 flex-shrink-0 text-zinc-400" />
+                        )}
+                        {activity.state === "processing" && (
                           <Loader2
                             className={cn(
                               "w-4 h-4 flex-shrink-0 animate-spin",
@@ -828,10 +1038,8 @@ export default function ChestifyApp() {
                             )}
                           />
                         )}
-                        {activity.status === "failed" && (
-                          <AlertTriangle
-                            className={cn("w-4 h-4 flex-shrink-0", isDark ? "text-orange-500" : "text-orange-600")}
-                          />
+                        {activity.state === "error" && (
+                          <AlertTriangle className="w-4 h-4 flex-shrink-0 text-zinc-500" />
                         )}
                         <span className={cn("text-sm truncate", isDark ? "text-white/80" : "text-neutral-700")}>
                           {activity.url}
