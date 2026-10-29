@@ -5,7 +5,7 @@
  * Review focus: Main application flow, authentication, Firestore items, themes, and chat.
  */
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -330,6 +330,7 @@ export default function ChestifyApp() {
   const [isAdding, setIsAdding] = useState(false)
   const [chatInput, setChatInput] = useState("")
   const [messages, setMessages] = useState<Array<{ role: "user" | "assistant"; content: string }>>([])
+  const messagesEndRef = useRef<HTMLDivElement>(null)
   const [currentVideoContext, setCurrentVideoContext] = useState<string | null>(null)
   const [isDark, setIsDark] = useState(true)
   const [activeTheme, setActiveTheme] = useState<keyof typeof themes>("fire-ice")
@@ -355,6 +356,11 @@ export default function ChestifyApp() {
       }
     }
   }, [])
+
+  // Keeps the newest chat message in view inside the scrolling message list.
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" })
+  }, [messages])
 
   // Writes the active theme key to localStorage whenever the user changes it.
   useEffect(() => {
@@ -1069,10 +1075,12 @@ export default function ChestifyApp() {
               >
                 Chat
               </h2>
-              <div className="h-[600px] flex flex-col">
+              {/* Fixed-height panel: min-h-0 on each flex level lets the message
+                  list scroll inside it instead of pushing past the footer. */}
+              <div className="h-[70dvh] min-h-[420px] max-h-[760px] flex flex-col">
                 <Card
                   className={cn(
-                    "flex-1 backdrop-blur border flex flex-col",
+                    "flex-1 min-h-0 backdrop-blur border flex flex-col",
                     isDark ? "bg-black/40 border-white/10" : "bg-white border-neutral-200 shadow-sm",
                   )}
                 >
@@ -1084,8 +1092,8 @@ export default function ChestifyApp() {
                       Ask questions about your saved videos
                     </CardDescription>
                   </CardHeader>
-                  <CardContent className="flex-1 flex flex-col p-6">
-                    <div className="flex-1 overflow-y-auto space-y-4 mb-4">
+                  <CardContent className="flex-1 min-h-0 flex flex-col p-6">
+                    <div className="flex-1 min-h-0 overflow-y-auto space-y-4 mb-4 pr-1">
                       {messages.length === 0 ? (
                         <div className="h-full flex items-center justify-center">
                           <p className={cn("text-center", isDark ? "text-white/40" : "text-neutral-400")}>
@@ -1145,6 +1153,7 @@ export default function ChestifyApp() {
                           </div>
                         ))
                       )}
+                      <div ref={messagesEndRef} />
                     </div>
                     <div className="flex gap-2 mb-4 flex-wrap">
                       <Button
