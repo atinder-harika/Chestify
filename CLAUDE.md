@@ -53,15 +53,28 @@ It doesn't need to be production-grade, but real test users must be able to use 
 | `gemini-3.x` | grounding returns 429 (no free quota); plain calls work |
 | `gemini-2.5-flash-lite` | 404, "no longer available to new users" |
 
-## Repo state to sort out first
-- Commit history was rewritten locally to remove Copilot/Claude co-author
-  trailers. Local `master` has **diverged** from `origin/master` (18 ahead, 18
-  behind), and that's expected. **Don't `git pull`.** Push with
-  `git push --force-with-lease origin master`. The old history is kept in
-  `backup/pre-trailer-cleanup`, which can be deleted once GitHub looks right.
+## Repo state
+- History was rewritten (Oct 29) to remove Copilot/Claude co-author trailers and
+  force-pushed. `master` is clean and in sync with GitHub. A local branch
+  `backup/pre-trailer-cleanup` still holds the old history and can be deleted.
 - A friend's frontend changes (new **Stats page** and an **interactive
   "new video" animation**) will be pasted in. Merge them carefully into the
   current `page.tsx` structure.
+- `backend/services/firestore_listener.py` also listens to a `demo_items`
+  collection that the frontend never uses. It's dead code, so remove it or
+  ignore it.
+
+## Firestore rules (`firestore.rules`, deploy from the Firebase console)
+- The rules currently only allow a signed-in user to read and write
+  `users/{uid}` and `users/{uid}/items/*`. **Any new client-side collection
+  is denied by default.** Add a rule when adding:
+  - chat history, e.g. `users/{uid}/chats/{chatId}` (and its messages);
+  - stats data, if the client writes or reads it outside `items`.
+- Backend writes via the Firebase Admin SDK bypass the rules, so a
+  backend-only `video_cache` needs no client rule. Keep it denied to clients.
+- Security bar for this stretch is "reasonable prototype": per-user data
+  isolation, no secrets in git, and an authenticated `/chat`. Hardening
+  beyond that is out of scope for now.
 
 ## Goals (prof feedback and Atinder's own list)
 
@@ -71,7 +84,7 @@ It doesn't need to be production-grade, but real test users must be able to use 
   - **5–6: yellow, Half-truth / misleading**
   - **7–10: green, Mostly true**
   (Atinder said "1-4 red, 4-6 yellow", so the overlap at 4 is resolved as red.
-  Confirm with him.)
+  Confirm with him before building.)
 - **Red X overlay on the thumbnail** for false videos, with matching cues for
   yellow and green.
 - **One-line summary statement** that focuses on the *main* lie or spin, with
