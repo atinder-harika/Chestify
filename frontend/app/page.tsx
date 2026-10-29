@@ -495,10 +495,13 @@ export default function ChestifyApp() {
 
     try {
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+      // The backend only answers signed-in users, so send the Firebase ID token.
+      const idToken = await auth.currentUser?.getIdToken()
       const response = await fetch(`${apiUrl}/chat`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          ...(idToken ? { Authorization: `Bearer ${idToken}` } : {}),
         },
         body: JSON.stringify({
           message: userMessage,
@@ -506,10 +509,9 @@ export default function ChestifyApp() {
         }),
       })
 
-      if (!response.ok) throw new Error("Chat API failed")
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(data.detail || "Chat API failed")
 
-      const data = await response.json()
-      
       setMessages((prev) => [
         ...prev,
         {
@@ -523,14 +525,15 @@ export default function ChestifyApp() {
         ...prev,
         {
           role: "assistant",
-          content: "Sorry, I encountered an error. Please try again.",
+          content:
+            error instanceof Error && error.message !== "Chat API failed" && !error.message.startsWith("Failed to fetch")
+              ? error.message
+              : "Sorry, I encountered an error. Please try again.",
         },
       ])
     }
   }
 
-  // Prevents the card click from opening the video, formats its stored
-  // analysis as chat context, and opens the chat tab with an initial prompt.
   // Sends the item back to 'processing' so the backend listener re-runs the
   // fact-check. Asks first because each run spends limited daily AI quota.
   const handleRecheck = async (e: React.MouseEvent, item: VideoItem) => {
@@ -543,6 +546,8 @@ export default function ChestifyApp() {
       await updateDoc(doc(db, "users", user.uid, "items", item.id), {
         status: "processing",
         error_message: "",
+        // Skip the shared analysis cache so the recheck is a fresh fact-check.
+        force_refresh: true,
       })
     } catch (error) {
       console.error("Recheck failed:", error)
@@ -550,6 +555,8 @@ export default function ChestifyApp() {
     }
   }
 
+  // Prevents the card click from opening the video, formats its stored
+  // analysis as chat context, and opens the chat tab with an initial prompt.
   const handleOpenAIAnalysis = (e: React.MouseEvent, item: VideoItem) => {
     e.preventDefault()
     e.stopPropagation()

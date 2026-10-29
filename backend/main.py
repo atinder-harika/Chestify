@@ -8,11 +8,12 @@ Review focus: FastAPI lifecycle, CORS, health checks, and chat API routing.
 from dotenv import load_dotenv
 load_dotenv()  # Load .env FIRST before any other imports
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from pydantic import BaseModel
 import logging
+from firebase_admin import auth as firebase_auth
 from config.firebase_config import initialize_firebase
 from services import firestore_listener
 from services.ai_service import initialize_gemini
@@ -86,9 +87,21 @@ class ChatRequest(BaseModel):
     context: str | None = None
 
 
+def require_user(authorization: str | None = Header(default=None)) -> str:
+    """Verify the Firebase ID token in 'Authorization: Bearer <token>' and return the uid."""
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Sign in to use chat.")
+    try:
+        decoded = firebase_auth.verify_id_token(authorization.removeprefix("Bearer ").strip())
+    except Exception:
+        raise HTTPException(status_code=401, detail="Your session expired. Please sign in again.")
+    return decoded["uid"]
+
+
+# Sync def so FastAPI runs it in a worker thread; the Gemini call blocks.
 @app.post("/chat")
-async def chat(request: ChatRequest):
-    """Chat endpoint with optional video context"""
+def chat(request: ChatRequest, uid: str = Depends(require_user)):
+    """Chat endpoint with optional video context (signed-in users only)"""
     try:
         client = initialize_gemini()
         
@@ -118,8 +131,8 @@ Provide a helpful, accurate response."""
         }
         
     except Exception as e:
-        logger.error(f"Chat error: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Chat error for {uid}: {str(e)}")
+        raise HTTPException(status_code=500, detail="Chat is temporarily unavailable. Please try again.")
 
 
 if __name__ == "__main__":

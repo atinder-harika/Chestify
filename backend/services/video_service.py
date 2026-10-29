@@ -61,13 +61,18 @@ def extract_video_info(url: str) -> Dict[str, Any]:
             if not transcript:
                 transcript = info.get('description', '')[:500]
             
+            # Stable identity across share links and tracking params,
+            # e.g. "TikTok:7470919475173395734". Used as the analysis cache key.
+            video_key = f"{info.get('extractor_key') or info.get('extractor') or 'video'}:{info.get('id') or url}"
+
             result = {
                 'title': title,
                 'thumbnail': thumbnail,
                 'transcript': transcript,
                 'duration': duration,
                 'uploader': uploader,
-                'url': url
+                'url': url,
+                'video_key': video_key
             }
             
             logger.info(f"Successfully extracted info from: {title}")

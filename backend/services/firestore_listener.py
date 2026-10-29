@@ -5,8 +5,10 @@ Owner: Atinder Singh Hari
 Review focus: Real-time Firestore listeners, duplicate protection, and processing status updates.
 """
 
+import hashlib
 import logging
 import threading
+from datetime import datetime, timedelta, timezone
 from google.cloud.firestore_v1 import FieldFilter
 from config.firebase_config import get_firestore_client
 from services.video_service import extract_video_info, VideoExtractionError
@@ -26,6 +28,40 @@ VERDICT_STATUS = {
     "false": "false",
     "unverified": "unverified",
 }
+
+# Analyses are shared across users by video, so the same video never costs a
+# second Gemini call. Bump CACHE_VERSION when the analysis format changes.
+CACHE_COLLECTION = "video_cache"
+CACHE_VERSION = 1
+CACHE_MAX_AGE = timedelta(days=7)
+
+
+def _cache_ref(db, video_key: str):
+    return db.collection(CACHE_COLLECTION).document(hashlib.sha256(video_key.encode()).hexdigest())
+
+
+def get_cached_analysis(db, video_key: str):
+    """Return a fresh cached analysis for this video, or None."""
+    snap = _cache_ref(db, video_key).get()
+    if not snap.exists:
+        return None
+    cached = snap.to_dict() or {}
+    created = cached.get("created_at")
+    if cached.get("version") != CACHE_VERSION or not created:
+        return None
+    if datetime.now(timezone.utc) - created > CACHE_MAX_AGE:
+        return None
+    return cached.get("result")
+
+
+def store_cached_analysis(db, video_key: str, url: str, result: dict):
+    _cache_ref(db, video_key).set({
+        "video_key": video_key,
+        "url": url,
+        "version": CACHE_VERSION,
+        "created_at": datetime.now(timezone.utc),
+        "result": result,
+    })
 
 
 def start_firestore_listener():
@@ -119,19 +155,37 @@ def process_item(item_ref, item_id: str, item_data: dict):
             'transcript': video_info['transcript']
         })
 
-        logger.info(f"Analyzing content with AI: {video_info['title']}")
+        db = get_firestore_client()
+        video_key = video_info['video_key']
+        # Recheck sets force_refresh so the user gets a genuinely new analysis.
+        force_refresh = bool(item_data.get('force_refresh'))
 
-        ai_result = analyze_content(
-            title=video_info['title'],
-            transcript=video_info['transcript'],
-            url=url
-        )
+        ai_result = None
+        if not force_refresh:
+            try:
+                ai_result = get_cached_analysis(db, video_key)
+            except Exception:
+                logger.exception("Cache lookup failed; analyzing instead")
+        if ai_result:
+            logger.info(f"Cache hit for {video_key}; skipping Gemini")
+        else:
+            logger.info(f"Analyzing content with AI: {video_info['title']}")
+            ai_result = analyze_content(
+                title=video_info['title'],
+                transcript=video_info['transcript'],
+                url=url
+            )
+            try:
+                store_cached_analysis(db, video_key, url, ai_result)
+            except Exception:
+                logger.exception("Cache write failed")
 
         update_data = {
             **ai_result,
             'status': VERDICT_STATUS[ai_result['verdict']],
             'error_message': '',
-            'placeholder': False
+            'placeholder': False,
+            'force_refresh': False
         }
 
         item_ref.update(update_data)
