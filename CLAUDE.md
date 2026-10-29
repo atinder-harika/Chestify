@@ -79,12 +79,45 @@ It doesn't need to be production-grade, but real test users must be able to use 
 ## Goals (prof feedback and Atinder's own list)
 
 ### 1. Make the verdict obvious (top priority)
-- **Confidence score 1–10** on every video, shown above or below the video:
-  - **1–4: red, False**
-  - **5–6: yellow, Half-truth / misleading**
+- **Accuracy score 1–10** on every video, shown above or below the video.
+  It rates **how accurate the video's main claim is, based on the evidence**,
+  not how confident the AI is. Bands (decided: **1–3 false, 4–6 half-truth,
+  7–10 true**):
+  - **1–3: red, False**
+  - **4–6: yellow, Half-truth / misleading**
   - **7–10: green, Mostly true**
-  (Atinder said "1-4 red, 4-6 yellow", so the overlap at 4 is resolved as red.
-  Confirm with him before building.)
+  - **No score: grey, Unverified** (no relevant evidence found)
+
+  Rubric to put in the Gemini prompt:
+
+  | Score | Verdict | Means |
+  |---|---|---|
+  | 1–2 | False | Main claim fabricated or debunked; strong sources directly contradict it |
+  | 3 | False | Main claim wrong, maybe with a small true detail mixed in |
+  | 4 | Half-truth | Real facts twisted into a false conclusion (the celebrity-charity example) |
+  | 5 | Half-truth | Partly right and partly wrong in roughly equal measure, or two sides with real evidence for each |
+  | 6 | Half-truth | Mostly right, but missing important context or exaggerated |
+  | 7–8 | True | Accurate, with small simplifications or minor errors that don't change the takeaway |
+  | 9–10 | True | Accurate and confirmed by several reliable, independent sources |
+
+  Rules on top of the table, so scoring stays consistent:
+  1. **Score the main claim, not the average.** Four true details and one
+     false main point means false.
+  2. **Caps:**
+     - If the central claim is false, the score is at most 3.
+     - If it's spin or missing key context, the score is at most 6.
+     - Anything above 8 needs at least 2 independent reliable sources.
+  3. **Weigh sources by quality, not count.** Official bodies, peer-reviewed
+     research and major outlets beat blogs and social posts. Sources that just
+     repeat the video don't count as independent.
+  4. **No relevant evidence means no score.** Return `null` and show grey
+     "Unverified". Never default to 5.
+  5. **Opinions and jokes aren't scored.** Fact-check only the factual claims
+     inside them.
+
+  Gemini also returns a short `score_reason` naming the rule applied (e.g.
+  "Capped at 4: real donation, false recipient"). Use it as the one-line
+  conclusion and to explain scoring in the demo.
 - **Red X overlay on the thumbnail** for false videos, with matching cues for
   yellow and green.
 - **One-line summary statement** that focuses on the *main* lie or spin, with
@@ -101,8 +134,8 @@ It doesn't need to be production-grade, but real test users must be able to use 
   links, so resolve them or show the source title/domain so citations look
   credible.
 - **Implementation:** rewrite the prompt in `ai_service.py` so the *same
-  single call* returns `confidence_score`, `verdict`
-  (true / half_truth / false), `one_line_summary`, `highlight` (the exact
+  single call* returns `accuracy_score` (1–10 or null),
+  `score_reason`, `verdict` (true / half_truth / false / unverified), `one_line_summary`, `highlight` (the exact
   phrase to color), `main_false_claim`, `conclusion`, and
   `sources_for` / `sources_against`. Update the listener's status mapping and
   the frontend types and filters (they currently use
