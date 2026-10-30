@@ -242,6 +242,14 @@ re-running, the 1000-character transcript limit, and fragile JSON parsing.
   use Google Search grounding too. That spends the same scarce grounded quota
   (about 3–4 a day) as fact-checks, so only add it behind an explicit "Search
   the web" button, or once there's a paid tier.
+- **Settings page:** the profile menu's "Settings" item does nothing yet.
+  Basics would be:
+  - **Change display name:** `updateProfile`, which is cheap.
+  - **Upload a profile picture:** needs Firebase Storage, which isn't set up
+    yet. Store it at `users/{uid}/avatar`, add Storage rules (owner-only, image
+    types, size limit), then call `updateProfile({ photoURL })`.
+  - **Email accounts:** change password and send a reset link.
+  Until then, consider hiding the dead Settings item so testers don't hit it.
 
 ## Purpose to keep in mind
 Make it obvious and useful: tell **lies, half-truths, and truths** apart at a
