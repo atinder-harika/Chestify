@@ -534,20 +534,20 @@ export default function ChestifyApp() {
     }
   }
 
-  // Sends the item back to 'processing' so the backend listener re-runs the
-  // fact-check. Asks first because each run spends limited daily AI quota.
-  const handleRecheck = async (e: React.MouseEvent, item: VideoItem) => {
+  // Sends the item back to 'processing' so the backend listener re-runs it.
+  // Recheck (fresh) skips the shared analysis cache and spends limited daily
+  // AI quota, so it asks first; Retry after an error may reuse the cache.
+  const handleRecheck = async (e: React.MouseEvent, item: VideoItem, fresh = true) => {
     e.preventDefault()
     e.stopPropagation()
     if (!user) return
-    if (!window.confirm("Recheck uses one AI fact-check (limited per day). Continue?")) return
+    if (fresh && !window.confirm("Recheck uses one AI fact-check (limited per day). Continue?")) return
 
     try {
       await updateDoc(doc(db, "users", user.uid, "items", item.id), {
         status: "processing",
         error_message: "",
-        // Skip the shared analysis cache so the recheck is a fresh fact-check.
-        force_refresh: true,
+        force_refresh: fresh,
       })
     } catch (error) {
       console.error("Recheck failed:", error)
@@ -914,7 +914,7 @@ export default function ChestifyApp() {
                           </p>
                           <Button
                             size="sm"
-                            onClick={(e) => handleRecheck(e, item)}
+                            onClick={(e) => handleRecheck(e, item, false)}
                             className="w-full rounded-full text-xs border bg-zinc-500/30 text-zinc-200 hover:bg-zinc-500/40 border-zinc-400/40"
                           >
                             <RotateCw className="w-3 h-3 mr-1" />
