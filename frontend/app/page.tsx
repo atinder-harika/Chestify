@@ -31,6 +31,7 @@ import { onAuthStateChanged, signInWithPopup, signOut, type User } from "firebas
 import { addVideoToFirestore } from "@/lib/firestore-helpers"
 import { ThemeControls } from "@/components/theme-controls"
 import { UserProfileDropdown } from "@/components/user-profile-dropdown"
+import { EmailAuthForm } from "@/components/email-auth-form"
 import ReactMarkdown from "react-markdown"
 
 type TimestampValue = Timestamp | { seconds: number } | Date | string | number
@@ -380,6 +381,10 @@ export default function ChestifyApp() {
   const [user, setUser] = useState<User | null>(null)
   const [authLoading, setAuthLoading] = useState(true)
   const [authError, setAuthError] = useState<string | null>(null)
+  const [showEmailAuth, setShowEmailAuth] = useState(false)
+  // Bumped after a new email account's name is saved; Firebase mutates the
+  // same User object, so this re-renders the header with the new name.
+  const [, setProfileVersion] = useState(0)
 
   const currentTheme = themes[activeTheme]
 
@@ -519,7 +524,7 @@ export default function ChestifyApp() {
 
   const userData = user
     ? {
-        displayName: user.displayName || "Chestify user",
+        displayName: user.displayName || user.email?.split("@")[0] || "Chestify user",
         email: user.email || "",
         photoURL: user.photoURL || "",
         initials: (user.displayName || user.email || "C")
@@ -797,6 +802,30 @@ export default function ChestifyApp() {
             >
               Sign in with Google
             </Button>
+            <div className="space-y-4">
+              {showEmailAuth ? (
+                <EmailAuthForm
+                  isDark={isDark}
+                  submitClassName={cn(
+                    "bg-gradient-to-r font-medium",
+                    currentTheme.buttonGradient,
+                    isDark ? "text-white" : "text-black",
+                  )}
+                  onProfileUpdated={() => setProfileVersion((v) => v + 1)}
+                />
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setShowEmailAuth(true)}
+                  className={cn(
+                    "text-sm underline underline-offset-4",
+                    isDark ? "text-white/60 hover:text-white" : "text-neutral-600 hover:text-neutral-900",
+                  )}
+                >
+                  Use email instead
+                </button>
+              )}
+            </div>
           </div>
         </div>
       </div>
