@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { DirectionAwareHover } from "@/components/direction-aware-hover"
-import { CheckCircle2, AlertTriangle, Loader2, Send, Plus, Package, Clock, XCircle, HelpCircle, X, RotateCw, ExternalLink, History, MessageSquare } from "lucide-react"
+import { CheckCircle2, AlertTriangle, Loader2, Send, Plus, Package, Clock, XCircle, HelpCircle, X, RotateCw, ExternalLink, History, MessageSquare, Sparkles } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { auth, db, googleProvider } from "@/lib/firebase/config"
 import {
@@ -274,6 +274,165 @@ function cardSources(item: VideoItem): CitedSource[] {
     .slice(0, 3)
 }
 
+type StepState = "done" | "active" | "pending"
+
+// One row of the processing stepper (design from the dashboard prototype).
+function ProcessingStep({ state, title, detail, last }: { state: StepState; title: string; detail: string; last?: boolean }) {
+  return (
+    <div className={cn("flex gap-3", state === "pending" && "opacity-50")}>
+      <div className="flex flex-col items-center">
+        {state === "done" ? (
+          <div className="flex h-6 w-6 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-red-500 text-xs text-green-300">
+            <CheckCircle2 className="h-4 w-4" />
+          </div>
+        ) : state === "active" ? (
+          <div className="flex h-6 w-6 items-center justify-center rounded-full border-2 border-blue-400 border-t-red-400 animate-spin">
+            <div className="h-2 w-2 rounded-full bg-blue-300" />
+          </div>
+        ) : (
+          <div className="h-6 w-6 rounded-full bg-white/25" />
+        )}
+        {!last && (
+          <div className={cn("h-7 w-px", state === "done" ? "bg-gradient-to-b from-blue-500 to-red-500" : "bg-white/15")} />
+        )}
+      </div>
+      <div>
+        <p className="text-sm font-medium text-white">
+          {title}
+          {state === "active" && <span className="text-blue-300 animate-pulse"> •</span>}
+        </p>
+        <p className={cn("text-xs", state === "done" ? "text-green-400" : state === "active" ? "text-blue-300" : "text-white/60")}>
+          {detail}
+        </p>
+      </div>
+    </div>
+  )
+}
+
+// Popup shown after adding a video. Steps advance on the item's real
+// Firestore updates: the backend sets the title/thumbnail once yt-dlp has
+// the captions, then the verdict when the fact-check finishes.
+function ProcessingDialog({
+  item,
+  onClose,
+  onViewLibrary,
+}: {
+  item?: VideoItem
+  onClose: () => void
+  onViewLibrary: () => void
+}) {
+  const finished = !!item && item.status !== "processing"
+  const fetched = finished || (!!item && !!item.title && item.title !== "Processing...")
+  const failed = item?.status === "error"
+  const state = item ? getDisplayState(item) : "processing"
+  const meta = state === "processing" ? null : VERDICT_META[state]
+  const oneLine = failed
+    ? item?.error_message || "We couldn't finish checking this video."
+    : item?.one_line_summary || item?.fact_check?.reason || ""
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="processing-title"
+    >
+      <Card className="max-h-[92dvh] w-full max-w-4xl overflow-y-auto rounded-3xl border border-white/10 bg-[#0f0f11] p-6 shadow-2xl shadow-black/60 sm:p-10">
+        <CardContent className="grid grid-cols-1 gap-8 p-0 md:grid-cols-2 md:gap-10">
+          <div className="relative mx-auto flex aspect-[9/16] w-full max-w-[180px] items-center justify-center overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-b from-white/25 via-white/10 to-black/70 shadow-inner shadow-white/10 sm:max-w-[260px] md:max-w-none">
+            {item?.thumbnail ? (
+              <>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={item.thumbnail} alt="" className="absolute inset-0 h-full w-full object-cover" />
+                {!finished && <div className="absolute inset-0 bg-black/40" />}
+                {finished && <VerdictOverlay state={state} score={item.accuracy_score} />}
+              </>
+            ) : (
+              <>
+                <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,rgba(255,255,255,0.35),transparent_42%),linear-gradient(115deg,transparent_28%,rgba(255,255,255,0.18)_48%,transparent_66%)] opacity-80 blur-sm" />
+                <div className="absolute -inset-10 animate-pulse bg-[conic-gradient(from_180deg_at_50%_45%,transparent,rgba(67,139,255,0.16),transparent,rgba(244,63,94,0.14),transparent)] blur-2xl" />
+              </>
+            )}
+            {!finished && (
+              <div className="relative flex flex-col items-center gap-2">
+                <div className="relative">
+                  <Sparkles className="h-16 w-16 -rotate-12 text-blue-300 drop-shadow-[0_0_12px_rgba(96,165,250,0.9)]" />
+                  <span className="absolute -right-2 -top-2 text-sm text-pink-300">✦</span>
+                </div>
+                <span className="bg-gradient-to-r from-blue-300 to-pink-400 bg-clip-text text-3xl font-semibold text-transparent">AI</span>
+              </div>
+            )}
+          </div>
+
+          <div className="flex min-w-0 flex-col justify-center">
+            <h2 id="processing-title" className="mb-2 text-2xl font-semibold tracking-tight text-white">
+              {!finished ? "Analyzing Video Content..." : failed ? "Couldn't finish this check" : "Verdict ready"}
+            </h2>
+            <p className="mb-8 truncate text-sm text-white/50">{fetched && item?.title ? item.title : "Reading your link..."}</p>
+
+            <div className="space-y-6">
+              <ProcessingStep
+                state={fetched ? "done" : "active"}
+                title="Fetching video & captions"
+                detail={fetched ? "Completed" : "Active"}
+              />
+              <ProcessingStep
+                state={finished ? "done" : fetched ? "active" : "pending"}
+                title="AI fact-checking with Google Search"
+                detail={finished ? "Completed" : fetched ? "Usually 10–40 seconds" : "Pending"}
+              />
+              <ProcessingStep
+                state={finished ? "done" : "pending"}
+                title="Saving to Chest"
+                detail={finished ? "Completed" : "Pending"}
+                last
+              />
+            </div>
+
+            {finished && meta && (
+              <div className={cn("mt-6 rounded-lg border p-3 backdrop-blur-sm", meta.box)}>
+                <div className="mb-1 flex items-center justify-between gap-2">
+                  <p className={cn("text-xs font-semibold", meta.boxText)}>
+                    {meta.label}
+                    {failed && " · CHECK FAILED"}
+                  </p>
+                  {!failed && <ScorePill state={state as Verdict} score={item?.accuracy_score} className="px-2.5 py-0.5 text-xs" />}
+                </div>
+                <p className="text-sm leading-snug text-white/90">
+                  <HighlightedText text={oneLine} highlight={failed ? undefined : item?.highlight} className={meta.highlight} />
+                </p>
+              </div>
+            )}
+
+            {finished ? (
+              <div className="mt-6 flex gap-2">
+                <Button onClick={onViewLibrary} className="flex-1 rounded-full bg-gradient-to-r from-blue-600 to-red-500 text-white">
+                  View in Library
+                </Button>
+                <Button
+                  onClick={onClose}
+                  variant="outline"
+                  className="flex-1 rounded-full border-white/20 bg-white/5 text-white hover:bg-white/10"
+                >
+                  {failed ? "Close" : "Add another"}
+                </Button>
+              </div>
+            ) : (
+              <Button
+                onClick={onClose}
+                variant="outline"
+                className="mt-6 w-full rounded-full border-white/20 bg-white/5 text-white hover:bg-white/10"
+              >
+                Run in Background
+              </Button>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
+
 const themes = {
   gold: {
     name: "Chestify Gold",
@@ -362,6 +521,8 @@ export default function ChestifyApp() {
   const [filter, setFilter] = useState<FilterType>("all")
   const [urlInput, setUrlInput] = useState("")
   const [isAdding, setIsAdding] = useState(false)
+  // Item shown in the processing popup on the Add tab; null when closed.
+  const [trackingId, setTrackingId] = useState<string | null>(null)
   const [chatInput, setChatInput] = useState("")
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [chats, setChats] = useState<ChatSummary[]>([])
@@ -439,6 +600,11 @@ export default function ChestifyApp() {
       setMessages(snapshot.docs.map((d) => ({ id: d.id, ...d.data() }) as ChatMessage))
     })
   }, [user, activeChatId])
+
+  // The processing popup belongs to the Add tab; leaving the tab runs it in the background.
+  useEffect(() => {
+    if (activeTab !== "add") setTrackingId(null)
+  }, [activeTab])
 
   // Keeps the newest chat message in view inside the scrolling message list.
   useEffect(() => {
@@ -537,15 +703,15 @@ export default function ChestifyApp() {
     : null
 
   // Validates the URL input, delegates the authenticated Firestore write to
-  // addVideoToFirestore, and returns the user to the library tab.
+  // addVideoToFirestore, and opens the processing popup for the new item.
   const handleAddVideo = async () => {
     if (!urlInput.trim()) return
     setIsAdding(true)
 
     try {
-      await addVideoToFirestore(urlInput)
+      const itemId = await addVideoToFirestore(urlInput)
       setUrlInput("")
-      setActiveTab("library")
+      setTrackingId(itemId)
     } catch (error) {
       console.error("Error adding video:", error)
       alert("Failed to add video. Please try again.")
@@ -1242,6 +1408,17 @@ export default function ChestifyApp() {
                   ))}
                 </CardContent>
               </Card>
+
+              {trackingId && (
+                <ProcessingDialog
+                  item={firestoreItems.find((i) => i.id === trackingId)}
+                  onClose={() => setTrackingId(null)}
+                  onViewLibrary={() => {
+                    setTrackingId(null)
+                    setActiveTab("library")
+                  }}
+                />
+              )}
             </div>
           )}
           {activeTab === "chat" && (

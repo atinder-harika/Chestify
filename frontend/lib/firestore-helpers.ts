@@ -8,7 +8,8 @@ import { collection, addDoc, Timestamp } from 'firebase/firestore'
 
 // Verifies Firebase Auth, creates the users/{uid}/items collection reference,
 // and writes a processing record for the backend listener to consume.
-export async function addVideoToFirestore(url: string) {
+// Returns the new item's id so the caller can follow its progress.
+export async function addVideoToFirestore(url: string): Promise<string> {
   console.log('📝 Adding video:', url)
 
   const user = auth.currentUser
@@ -37,6 +38,7 @@ export async function addVideoToFirestore(url: string) {
       sources: []
     })
     console.log('✅ Document added with ID:', docRef.id)
+    return docRef.id
   } catch (error) {
     console.error('❌ Error adding document:', error)
     throw error
