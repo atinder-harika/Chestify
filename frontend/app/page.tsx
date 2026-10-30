@@ -339,7 +339,7 @@ function ProcessingDialog({
     >
       <Card className="max-h-[92dvh] w-full max-w-4xl overflow-y-auto rounded-3xl border border-white/10 bg-[#0f0f11] p-6 shadow-2xl shadow-black/60 sm:p-10">
         <CardContent className="grid grid-cols-1 gap-8 p-0 md:grid-cols-2 md:gap-10">
-          <div className="relative mx-auto flex aspect-[9/16] w-full max-w-[180px] items-center justify-center overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-b from-white/25 via-white/10 to-black/70 shadow-inner shadow-white/10 sm:max-w-[260px] md:max-w-none">
+          <div className="relative mx-auto flex aspect-[9/16] w-full max-w-[180px] items-center justify-center overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-b from-white/25 via-white/10 to-black/70 shadow-inner shadow-white/10 sm:max-w-[260px] md:max-w-[min(100%,calc((92dvh_-_5rem)*9/16))]">
             {item?.thumbnail ? (
               <>
                 {/* eslint-disable-next-line @next/next/no-img-element */}

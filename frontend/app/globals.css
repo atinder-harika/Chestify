@@ -128,6 +128,28 @@
     @apply bg-background text-foreground;
   }
 
+  /* Minimal scrollbars everywhere: thin grey thumb, no track. Works on the
+     dark and light themes. Chrome/Edge/Firefox use the standard properties;
+     the ::-webkit rules cover older Safari. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(161, 161, 170, 0.45) transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: rgba(161, 161, 170, 0.45);
+    border-radius: 9999px;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background: rgba(161, 161, 170, 0.7);
+  }
+
   /* Custom gradient utility for radial backgrounds */
   .bg-gradient-radial {
     background-image: radial-gradient(circle, var(--tw-gradient-stops));
