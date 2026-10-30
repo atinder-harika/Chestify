@@ -107,7 +107,7 @@ def format_history(history: list[ChatTurn]) -> str:
 def require_user(authorization: str | None = Header(default=None)) -> str:
     """Verify the Firebase ID token in 'Authorization: Bearer <token>' and return the uid."""
     if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Sign in to use chat.")
+        raise HTTPException(status_code=401, detail="Please sign in to continue.")
     try:
         decoded = firebase_auth.verify_id_token(authorization.removeprefix("Bearer ").strip())
     except Exception:
