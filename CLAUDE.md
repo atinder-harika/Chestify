@@ -221,7 +221,17 @@ re-running, the 1000-character transcript limit, and fragile JSON parsing.
   (datacenter IP). TikTok works. A residential proxy env var for yt-dlp is
   the fallback if YouTube must work publicly.
 
-### 6. Final polishing (low priority, after the features above)
+### 6. Final polishing (everything left is polish; main goals are done as of Oct 29)
+Suggested order for the next session:
+1. **Docs:** fix README/docs (Vercel → GitHub Pages; describe the current
+   pipeline, the rubric, the cache, Progress, and how to run it).
+2. **Hoax sources:** the item below.
+3. **Chat redesign:** Atinder will describe what he wants.
+4. **Progress tab UI tweaks:** Atinder has his own finishing changes.
+5. **Before the demo:** remove the 17 `placeholder: true` items (or keep them
+   in a test account), and add 2–3 real videos from `docs/DEMO_VIDEOS.md`,
+   spread over days because of the quota.
+
 - **Sources for absence-of-evidence verdicts:** for fabricated claims (e.g. the
   Beyoncé donation hoax, scored 2/10), Gemini cited pages about *other*
   donations as "contradicting" sources, though none address the claim.
