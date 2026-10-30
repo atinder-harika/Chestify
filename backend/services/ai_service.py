@@ -393,7 +393,9 @@ def analyze_content(title: str, transcript: str, url: str) -> Dict:
                 logger.error(f"❌ Gemini daily quota exhausted: {str(e)[:200]}")
                 raise AIAnalysisError("Daily AI quota reached. Please retry later.") from e
             if _is_retryable(e) and attempt < max_attempts - 1:
-                wait_time = (2 ** attempt) * 2  # 2s, 4s
+                # 503 "high demand" spikes last longer than per-minute rate limits.
+                overloaded = "503" in str(e) or "UNAVAILABLE" in str(e)
+                wait_time = (10, 30)[attempt] if overloaded else (2, 4)[attempt]
                 logger.warning(f"⏳ Gemini busy, retrying in {wait_time}s... (attempt {attempt + 1}/{max_attempts})")
                 time.sleep(wait_time)
                 continue
