@@ -14,7 +14,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { Settings, LogOut } from "lucide-react"
+import { LogOut } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 interface UserData {
@@ -41,12 +41,6 @@ export function UserProfileDropdown({ isDark, onSignOut, user, currentTheme }: U
   // Avoids rendering an empty account control until Firebase user data exists.
   if (!user) {
     return null
-  }
-
-  // Handles the current settings placeholder until an account settings route
-  // is implemented.
-  const handleSettingsClick = () => {
-    console.log("Settings clicked")
   }
 
   return (
@@ -87,18 +81,6 @@ export function UserProfileDropdown({ isDark, onSignOut, user, currentTheme }: U
           </div>
         </DropdownMenuLabel>
         <DropdownMenuSeparator className={isDark ? "bg-white/10" : "bg-neutral-200"} />
-        <DropdownMenuItem
-          onClick={handleSettingsClick}
-          className={cn(
-            "cursor-pointer transition-colors",
-            isDark 
-              ? `focus:bg-opacity-10 focus:${currentTheme.icon.replace('text-', 'text-')} hover:${currentTheme.icon.replace('text-', 'bg-')}/10` 
-              : `focus:bg-opacity-20 focus:${currentTheme.icon.replace('text-', 'text-')} hover:${currentTheme.icon.replace('text-', 'bg-')}/20`,
-          )}
-        >
-          <Settings className="w-4 h-4 mr-2" />
-          Settings
-        </DropdownMenuItem>
         <DropdownMenuItem
           onClick={onSignOut}
           className={cn(
