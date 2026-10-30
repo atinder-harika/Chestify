@@ -19,7 +19,7 @@ service cloud.firestore {
       }
     }
 
-    // video_cache is written only by the backend (Admin SDK bypasses rules),
-    // so clients have no access to it.
+    // video_cache and users/{uid}/insights are read and written only by the
+    // backend (Admin SDK bypasses rules), so clients have no access to them.
   }
 }

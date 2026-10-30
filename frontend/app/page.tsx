@@ -5,13 +5,14 @@
  * Review focus: Main application flow, authentication, Firestore items, themes, and chat.
  */
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useMemo, useRef } from "react"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { DirectionAwareHover } from "@/components/direction-aware-hover"
-import { CheckCircle2, AlertTriangle, Loader2, Send, Plus, Package, Clock, XCircle, HelpCircle, X, RotateCw, ExternalLink, History, MessageSquare, Sparkles } from "lucide-react"
+import { CheckCircle2, AlertTriangle, Loader2, Send, Plus, Package, Clock, XCircle, HelpCircle, X, RotateCw, ExternalLink, History, MessageSquare, Sparkles, TrendingUp, ShieldCheck, Trophy, Compass, Flame, LockKeyhole } from "lucide-react"
+import { computeProgress, type ProgressStats } from "@/lib/progress"
 import { cn } from "@/lib/utils"
 import { auth, db, googleProvider } from "@/lib/firebase/config"
 import {
@@ -59,7 +60,19 @@ function formatShortDate(timestamp: TimestampValue): string {
   }
 }
 
-type TabType = "library" | "add" | "chat"
+// Same conversions as formatShortDate, returning a Date (or null if unusable).
+function toDate(timestamp?: TimestampValue): Date | null {
+  if (!timestamp) return null
+  const date =
+    timestamp instanceof Timestamp
+      ? timestamp.toDate()
+      : typeof timestamp === "object" && "seconds" in timestamp
+        ? new Date(timestamp.seconds * 1000)
+        : new Date(timestamp)
+  return Number.isNaN(date.getTime()) ? null : date
+}
+
+type TabType = "library" | "add" | "chat" | "progress"
 
 type VideoStatus = "processing" | "verified" | "misleading" | "false" | "unverified" | "error"
 type Verdict = "true" | "half_truth" | "false" | "unverified"
@@ -433,6 +446,317 @@ function ProcessingDialog({
   )
 }
 
+type Suggestion = { topic: string; why: string; explore: string[]; caution: string }
+
+type InsightsState =
+  | { status: "idle" | "loading" }
+  | { status: "ok"; suggestions: Suggestion[] }
+  | { status: "not_enough"; needed: number }
+  | { status: "error"; message: string }
+
+const BADGE_ICONS: Record<string, typeof ShieldCheck> = {
+  first: CheckCircle2,
+  myth: X,
+  skeptic: ShieldCheck,
+  truth: Trophy,
+  explorer: Compass,
+  streak: Flame,
+}
+
+// Verdict colors for the topic bars, matching the Library cards.
+const VERDICT_BAR: Record<Verdict, string> = {
+  true: "bg-emerald-400",
+  half_truth: "bg-yellow-400",
+  false: "bg-red-500",
+  unverified: "bg-zinc-500",
+}
+
+// Progress tab: layout and styling from the dashboard prototype, filled with
+// stats computed from the user's checked videos plus cached AI suggestions.
+function ProgressTab({
+  stats,
+  isDark,
+  displayName,
+  initials,
+  insights,
+  onRetryInsights,
+  onAddVideo,
+}: {
+  stats: ProgressStats
+  isDark: boolean
+  displayName: string
+  initials: string
+  insights: InsightsState
+  onRetryInsights: () => void
+  onAddVideo: () => void
+}) {
+  const card = cn("border backdrop-blur-xl", isDark ? "border-white/10 bg-[#0f0f11]/80" : "border-neutral-200 bg-white")
+  const title = cn("text-lg", isDark ? "text-white" : "text-neutral-900")
+  const muted = isDark ? "text-white/45" : "text-neutral-500"
+
+  if (stats.checked === 0) {
+    return (
+      <Card className={cn(card, "mx-auto max-w-xl text-center")}>
+        <CardContent className="space-y-4 p-10">
+          <TrendingUp className="mx-auto h-8 w-8 text-blue-400" />
+          <h2 className={cn("text-xl font-semibold", isDark ? "text-white" : "text-neutral-900")}>Your progress starts here</h2>
+          <p className={muted}>Check your first video to see what you&apos;re learning and how much misinformation you&apos;ve caught.</p>
+          <Button onClick={onAddVideo} className="rounded-full bg-gradient-to-r from-blue-600 to-red-500 text-white">
+            <Plus className="mr-2 h-4 w-4" />
+            Add a video
+          </Button>
+        </CardContent>
+      </Card>
+    )
+  }
+
+  const topTopic = stats.topics[0]?.name
+  const maxTopic = stats.topics[0]?.total || 1
+  const heatColor = (count: number) =>
+    count === 0
+      ? isDark
+        ? "bg-white/[0.06]"
+        : "bg-neutral-100"
+      : count === 1
+        ? "bg-[#00b8db]/40"
+        : count === 2
+          ? "bg-[#00b8db]/70"
+          : "bg-[#00b8db]"
+
+  return (
+    <div className="space-y-8">
+      <section className="w-full grid grid-cols-1 gap-6 lg:grid-cols-4" aria-label="Profile and quick stats">
+        <Card className={cn("w-full h-full overflow-hidden", card)}>
+          <CardContent className="relative flex h-full items-center gap-4 p-6">
+            <div className="absolute -right-10 -top-16 h-40 w-40 rounded-full bg-blue-500/10 blur-3xl" />
+            <div className="relative rounded-full bg-gradient-to-br from-blue-500 via-indigo-400 to-red-500 p-[2px] shadow-[0_0_25px_rgba(59,130,246,0.28)]">
+              <div
+                className={cn(
+                  "flex h-16 w-16 items-center justify-center rounded-full text-xl font-semibold",
+                  isDark ? "bg-[#17171b] text-white" : "bg-white text-neutral-900",
+                )}
+              >
+                {initials}
+              </div>
+            </div>
+            <div className="relative min-w-0">
+              <p className={cn("text-xs uppercase tracking-[0.2em]", isDark ? "text-white/40" : "text-neutral-500")}>Chest member</p>
+              <h3 className={cn("mt-1 truncate text-xl font-semibold", isDark ? "text-white" : "text-neutral-900")}>{displayName}</h3>
+              <div className="mt-2 inline-flex items-center gap-1.5 rounded-full border border-orange-400/25 bg-orange-400/10 px-2.5 py-1 text-xs text-orange-300">
+                <Flame className="h-3.5 w-3.5" />
+                {stats.streak > 0 ? `Learning streak: ${stats.streak} day${stats.streak === 1 ? "" : "s"}` : "Check a video to start a streak"}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+        <div className="col-span-1 grid h-full w-full items-stretch gap-6 sm:grid-cols-3 lg:col-span-3">
+          {[
+            { label: "Videos checked", value: stats.checked, detail: `+${stats.thisMonth} this month`, icon: TrendingUp, color: "text-blue-400" },
+            { label: "Misleading claims caught", value: stats.caught, detail: `${stats.falseCount} false, ${stats.caught - stats.falseCount} half-true`, icon: ShieldCheck, color: "text-red-400" },
+            { label: "Topics explored", value: stats.topicsExplored, detail: topTopic ? `Most: ${topTopic}` : "", icon: Compass, color: "text-violet-400" },
+          ].map((metric) => (
+            <Card key={metric.label} className={cn("h-full border backdrop-blur-md", isDark ? "border-white/10 bg-white/5" : "border-neutral-200 bg-white")}>
+              <CardContent className="flex h-full flex-col p-5">
+                <metric.icon className={cn("mb-5 h-5 w-5", metric.color)} />
+                <p className={cn("text-2xl font-semibold", isDark ? "text-white" : "text-neutral-900")}>{metric.value}</p>
+                <p className={cn("mt-1 text-sm", isDark ? "text-white/65" : "text-neutral-600")}>{metric.label}</p>
+                <p className={cn("mt-2 text-xs", isDark ? "text-white/35" : "text-neutral-400")}>{metric.detail}</p>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      </section>
+
+      <section className="grid gap-4 lg:grid-cols-[1.35fr_1fr]" aria-label="Activity and topics">
+        <Card className={card}>
+          <CardHeader className="pb-3">
+            <CardTitle className={title}>Fact-Checking Activity</CardTitle>
+            <CardDescription className={muted}>Last 12 weeks</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className={cn("overflow-x-auto rounded-lg p-3", isDark ? "bg-black/10" : "bg-neutral-50")}>
+              <div className="grid w-max grid-flow-col grid-rows-7 gap-1">
+                {stats.activity.map((day) => (
+                  <div
+                    key={day.date}
+                    title={`${day.date}: ${day.count} video${day.count === 1 ? "" : "s"}`}
+                    className={cn("h-4 w-4 rounded-sm sm:h-5 sm:w-5", heatColor(day.count))}
+                  />
+                ))}
+              </div>
+            </div>
+            <div className={cn("mt-3 flex flex-wrap items-center gap-2 text-xs", isDark ? "text-white/55" : "text-neutral-500")}>
+              <span>Less</span>
+              {[0, 1, 2, 3].map((n) => (
+                <span key={n} className={cn("h-3 w-3 rounded-sm", heatColor(n))} />
+              ))}
+              <span>More</span>
+            </div>
+          </CardContent>
+        </Card>
+        <Card className={card}>
+          <CardHeader className="pb-3">
+            <CardTitle className={title}>Knowledge Distribution</CardTitle>
+            <CardDescription className={muted}>Where your curiosity is taking you, and how true it was</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-5">
+            {stats.topics.slice(0, 8).map((topic) => {
+              const misleading = topic.counts.false + topic.counts.half_truth
+              return (
+                <div key={topic.name}>
+                  <div className="mb-2 flex justify-between gap-2 text-sm">
+                    <span className={cn("truncate", isDark ? "text-white/75" : "text-neutral-700")}>{topic.name}</span>
+                    <span className={cn("whitespace-nowrap", muted)}>
+                      {topic.total} video{topic.total === 1 ? "" : "s"}
+                      {misleading > 0 && ` · ${misleading} misleading`}
+                    </span>
+                  </div>
+                  <div className={cn("h-2 rounded-full", isDark ? "bg-white/[0.07]" : "bg-neutral-100")}>
+                    <div className="flex h-full overflow-hidden rounded-full" style={{ width: `${(topic.total / maxTopic) * 100}%` }}>
+                      {(["true", "half_truth", "false", "unverified"] as Verdict[]).map((v) =>
+                        topic.counts[v] ? (
+                          <div key={v} className={VERDICT_BAR[v]} style={{ flexGrow: topic.counts[v] }} title={`${VERDICT_META[v].filterLabel}: ${topic.counts[v]}`} />
+                        ) : null,
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )
+            })}
+            <div className={cn("flex flex-wrap items-center gap-4 text-xs", isDark ? "text-white/55" : "text-neutral-500")}>
+              {(["true", "half_truth", "false", "unverified"] as Verdict[]).map((v) => (
+                <div key={v} className="flex items-center gap-1.5">
+                  <span className={cn("h-3 w-3 rounded-sm", VERDICT_BAR[v])} />
+                  {VERDICT_META[v].filterLabel}
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      </section>
+
+      <section>
+        <Card className={card}>
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <CardTitle className={title}>Explore Next</CardTitle>
+                <CardDescription className={muted}>Suggestions based on what you&apos;ve checked, refreshed daily</CardDescription>
+              </div>
+              <Sparkles className="h-5 w-5 text-blue-300" />
+            </div>
+          </CardHeader>
+          <CardContent>
+            {(insights.status === "idle" || insights.status === "loading") && (
+              <div className="grid gap-4 md:grid-cols-3">
+                {[0, 1, 2].map((n) => (
+                  <div key={n} className={cn("h-32 animate-pulse rounded-xl", isDark ? "bg-white/5" : "bg-neutral-100")} />
+                ))}
+              </div>
+            )}
+            {insights.status === "not_enough" && (
+              <p className={muted}>
+                Check {insights.needed} more video{insights.needed === 1 ? "" : "s"} to get personalized suggestions.
+              </p>
+            )}
+            {insights.status === "error" && (
+              <div className="flex flex-wrap items-center gap-3">
+                <p className={muted}>{insights.message}</p>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={onRetryInsights}
+                  className={cn("rounded-full text-xs", isDark ? "border-white/20 bg-white/5 text-white/80 hover:bg-white/10" : "")}
+                >
+                  <RotateCw className="mr-1 h-3 w-3" />
+                  Try again
+                </Button>
+              </div>
+            )}
+            {insights.status === "ok" && (
+              <div className="grid gap-4 md:grid-cols-3">
+                {insights.suggestions.map((s) => (
+                  <div
+                    key={s.topic}
+                    className={cn("rounded-xl border p-4", isDark ? "border-white/10 bg-white/5" : "border-neutral-200 bg-neutral-50")}
+                  >
+                    <p className={cn("font-semibold", isDark ? "text-white" : "text-neutral-900")}>{s.topic}</p>
+                    <p className={cn("mt-1 text-sm", isDark ? "text-white/65" : "text-neutral-600")}>{s.why}</p>
+                    {s.explore.length > 0 && (
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {s.explore.map((e) => (
+                          <span
+                            key={e}
+                            className={cn(
+                              "rounded-full border px-2.5 py-1 text-xs",
+                              isDark ? "border-white/15 bg-white/5 text-white/75" : "border-neutral-200 bg-white text-neutral-700",
+                            )}
+                          >
+                            {e}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    {s.caution && (
+                      <p className="mt-3 flex gap-1.5 text-xs text-yellow-400">
+                        <AlertTriangle className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" />
+                        {s.caution}
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </section>
+
+      <section>
+        <div className="mb-4 flex items-center justify-between">
+          <div>
+            <h2 className={cn("text-xl font-semibold", isDark ? "text-white" : "text-neutral-900")}>Achievements</h2>
+            <p className={cn("mt-1 text-sm", muted)}>Small wins that add up to better signal.</p>
+          </div>
+          <Trophy className="h-5 w-5 text-yellow-400" />
+        </div>
+        <div className="flex flex-wrap gap-8">
+          {stats.badges.map((badge) => {
+            const Icon = badge.unlocked ? BADGE_ICONS[badge.id] : LockKeyhole
+            return (
+              <div key={badge.id} className="flex w-20 flex-col items-center text-center">
+                <div
+                  className={cn(
+                    "rounded-full p-[2px]",
+                    badge.unlocked
+                      ? "bg-gradient-to-br from-blue-400 via-fuchsia-400 to-red-500 shadow-[0_0_15px_rgba(236,72,153,0.5)]"
+                      : isDark
+                        ? "bg-white/15"
+                        : "bg-neutral-200",
+                  )}
+                >
+                  <div
+                    className={cn(
+                      "flex h-20 w-20 items-center justify-center rounded-full",
+                      isDark ? "bg-[#17171b]" : "bg-white",
+                      badge.unlocked ? "text-blue-300" : isDark ? "text-white/25" : "text-neutral-300",
+                    )}
+                  >
+                    <Icon className="h-8 w-8" />
+                  </div>
+                </div>
+                <p className={cn("mt-3 text-sm font-medium", isDark ? "text-white" : "text-neutral-900")}>{badge.title}</p>
+                <p className={cn("mt-1 text-[11px]", muted)}>
+                  {badge.unlocked ? badge.text : `${badge.current}/${badge.target} · ${badge.text}`}
+                </p>
+              </div>
+            )
+          })}
+        </div>
+      </section>
+    </div>
+  )
+}
+
 const themes = {
   gold: {
     name: "Chestify Gold",
@@ -521,6 +845,7 @@ export default function ChestifyApp() {
   const [filter, setFilter] = useState<FilterType>("all")
   const [urlInput, setUrlInput] = useState("")
   const [isAdding, setIsAdding] = useState(false)
+  const [insights, setInsights] = useState<InsightsState>({ status: "idle" })
   // Item shown in the processing popup on the Add tab; null when closed.
   const [trackingId, setTrackingId] = useState<string | null>(null)
   const [chatInput, setChatInput] = useState("")
@@ -600,6 +925,42 @@ export default function ChestifyApp() {
       setMessages(snapshot.docs.map((d) => ({ id: d.id, ...d.data() }) as ChatMessage))
     })
   }, [user, activeChatId])
+
+  // Fetches "explore next" suggestions. The backend caches them per user per
+  // day, so reopening the tab doesn't spend AI quota.
+  const loadInsights = async () => {
+    setInsights({ status: "loading" })
+    try {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+      const idToken = await auth.currentUser?.getIdToken()
+      const response = await fetch(`${apiUrl}/insights`, {
+        method: "POST",
+        headers: idToken ? { Authorization: `Bearer ${idToken}` } : {},
+      })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(data.detail || "Suggestions are temporarily unavailable.")
+      setInsights(
+        data.status === "not_enough"
+          ? { status: "not_enough", needed: data.needed ?? 1 }
+          : { status: "ok", suggestions: data.suggestions || [] },
+      )
+    } catch (error) {
+      console.error("Insights error:", error)
+      setInsights({
+        status: "error",
+        message:
+          error instanceof Error && !error.message.startsWith("Failed to fetch")
+            ? error.message
+            : "Suggestions are temporarily unavailable.",
+      })
+    }
+  }
+
+  useEffect(() => {
+    if (activeTab === "progress" && user) loadInsights()
+    // loadInsights only reads auth and the API URL, so it isn't a dependency.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, user])
 
   // The processing popup belongs to the Add tab; leaving the tab runs it in the background.
   useEffect(() => {
@@ -892,6 +1253,19 @@ export default function ChestifyApp() {
     ? "bg-white/5 border-white/20 text-white/70 hover:bg-white/10 hover:text-white"
     : "bg-neutral-50 border-neutral-300 text-neutral-600 hover:bg-neutral-100"
 
+  const progressStats = useMemo(
+    () =>
+      computeProgress(
+        firestoreItems.flatMap((item) => {
+          const state = getDisplayState(item)
+          return state === "processing"
+            ? []
+            : [{ created: toDate(item.created_at), category: item.category || "Other", verdict: state }]
+        }),
+      ),
+    [firestoreItems],
+  )
+
   const allItems = firestoreItems
   
   const filteredItems = allItems.filter((item) => filter === "all" || getDisplayState(item) === filter)
@@ -1058,12 +1432,12 @@ export default function ChestifyApp() {
           )}
         >
           <div className="container mx-auto px-6 py-4">
-            <div className="flex justify-center gap-2">
+            <div className="flex flex-wrap justify-center gap-2">
               <Button
                 onClick={() => setActiveTab("add")}
                 variant={activeTab === "add" ? "default" : "ghost"}
                 className={cn(
-                  "rounded-full px-6",
+                  "rounded-full px-4 sm:px-6",
                   activeTab === "add"
                     ? isDark
                       ? currentTheme.activeTab
@@ -1080,7 +1454,7 @@ export default function ChestifyApp() {
                 onClick={() => setActiveTab("library")}
                 variant={activeTab === "library" ? "default" : "ghost"}
                 className={cn(
-                  "rounded-full px-6",
+                  "rounded-full px-4 sm:px-6",
                   activeTab === "library"
                     ? isDark
                       ? currentTheme.activeTab
@@ -1096,7 +1470,7 @@ export default function ChestifyApp() {
                 onClick={() => setActiveTab("chat")}
                 variant={activeTab === "chat" ? "default" : "ghost"}
                 className={cn(
-                  "rounded-full px-6",
+                  "rounded-full px-4 sm:px-6",
                   activeTab === "chat"
                     ? isDark
                       ? currentTheme.activeTab
@@ -1107,6 +1481,23 @@ export default function ChestifyApp() {
                 )}
               >
                 Chat
+              </Button>
+              <Button
+                onClick={() => setActiveTab("progress")}
+                variant={activeTab === "progress" ? "default" : "ghost"}
+                className={cn(
+                  "rounded-full px-4 sm:px-6",
+                  activeTab === "progress"
+                    ? isDark
+                      ? currentTheme.activeTab
+                      : currentTheme.activeTabLight
+                    : isDark
+                      ? "text-white/60 hover:text-white hover:bg-white/5"
+                      : "text-neutral-600 hover:text-neutral-900 hover:bg-neutral-100",
+                )}
+              >
+                <TrendingUp className="w-4 h-4 mr-2" />
+                Progress
               </Button>
             </div>
           </div>
@@ -1667,6 +2058,17 @@ export default function ChestifyApp() {
                 </Card>
               </div>
             </div>
+          )}
+          {activeTab === "progress" && (
+            <ProgressTab
+              stats={progressStats}
+              isDark={isDark}
+              displayName={userData?.displayName || "Chestify user"}
+              initials={userData?.initials || "C"}
+              insights={insights}
+              onRetryInsights={loadInsights}
+              onAddVideo={() => setActiveTab("add")}
+            />
           )}
         </main>
         <footer

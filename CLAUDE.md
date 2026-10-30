@@ -49,10 +49,10 @@ Tools on this PC:
 
 ## Architecture
 - **frontend/**: Next.js (static export, `output: "export"`), TypeScript,
-  Tailwind, Radix/shadcn UI. Firebase Auth (Google only in the UI so far;
-  Email/Password is enabled in the console) and Firestore.
+  Tailwind, Radix/shadcn UI. Firebase Auth (Google and email/password)
+  and Firestore.
   Almost everything is in `frontend/app/page.tsx` (~1000 lines, tabs:
-  library / add / chat). Deployed to GitHub Pages by
+  library / add / chat / progress). Deployed to GitHub Pages by
   `.github/workflows/deploy-pages.yml` on every push to `master`. The
   `NEXT_PUBLIC_*` values are GitHub repo variables.
 - **backend/**: FastAPI on Railway (`backend/Dockerfile`, which includes Deno
@@ -86,6 +86,21 @@ Tools on this PC:
   real check clears the flag.
 - **Chat:** `POST /chat` in `main.py`, using `gemini-3.1-flash-lite` without
   grounding. It requires a Firebase ID token (`Authorization: Bearer ...`).
+  Chats are saved in `users/{uid}/chats/{chatId}/messages`.
+- **Add Video popup:** `ProcessingDialog` in `page.tsx` follows the new item's
+  real Firestore updates (title/thumbnail after yt-dlp, then the verdict).
+  "Run in Background" closes it.
+- **Progress tab:**
+  - **Stats:** computed client-side by `frontend/lib/progress.ts` from the
+    items: streak, counts, a 12-week heatmap, per-topic verdict mix, and
+    badges.
+  - **"Explore next":** `POST /insights` (`services/insights_service.py`), one
+    non-grounded flash-lite call per user per day at most. It's cached in the
+    backend-only `users/{uid}/insights/daily`, and Gemini is called again only
+    on a new day with new videos.
+- **Design reference:** a friend's prototype in
+  `Downloads\chestify-dashboard-build-2` (all mock data) supplied the popup
+  and Progress page markup. Nothing else from it was used.
 - **Don't run `tests/model_testing.py`.** It was a one-time check of which
   models allow grounding (only `gemini-2.5-flash` does), and it spends about
   6 grounded calls per run.
@@ -101,9 +116,8 @@ Tools on this PC:
 - History was rewritten (Oct 29) to remove Copilot/Claude co-author trailers and
   force-pushed. `master` is clean and in sync with GitHub. A local branch
   `backup/pre-trailer-cleanup` still holds the old history and can be deleted.
-- A friend's frontend changes (new **Stats page** and an **interactive
-  "new video" animation**) will be pasted in. Merge them carefully into the
-  current `page.tsx` structure.
+- The friend's Stats page and new-video animation have been merged as the
+  Progress tab and the Add Video popup.
 ## Firestore rules (`firestore.rules`, deploy with `firebase deploy --only firestore:rules`)
 - The rules currently only allow a signed-in user to read and write
   `users/{uid}` and `users/{uid}/items/*`. **Any new client-side collection
@@ -183,19 +197,10 @@ Tools on this PC:
 - **Demo content:** find compromised or suspicious videos (partly true, partly
   false, or two conflicting views) for the capstone showcase.
 
-### 2. Features
-- **Stats page** (friend's frontend): usage stats, mainly *how much the user
-  has explored each topic*. It needs backend/Firestore data, e.g. per-user
-  counts by category and tag, built from the existing `category`/`tags` fields
-  (cheap, no extra Gemini calls).
-- **New-video animation** (friend's frontend): wire it to the real
-  processing state.
-- **Chat history:** persist chat messages (e.g. `users/{uid}/chats/...`) and
-  reload them. Chat is good for clarifying a video's facts, so keep the "ask
-  about this video" flow.
-- **Email + password login** alongside Google: Firebase Auth email/password
-  (enable it in Firebase console → Authentication → Sign-in method), with
-  sign-up, sign-in and password reset.
+### 2. Features (all done)
+These are live: the Progress tab (from the friend's Stats page), the Add Video
+processing popup (from the friend's animation), chat history, and email +
+password login with sign-up and reset.
 
 ### 3. Bugs reported
 - **Chat look:** the overflow is fixed (`d071efc`), but Atinder doesn't like

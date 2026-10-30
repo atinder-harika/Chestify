@@ -14,9 +14,10 @@ from contextlib import asynccontextmanager
 from pydantic import BaseModel
 import logging
 from firebase_admin import auth as firebase_auth
-from config.firebase_config import initialize_firebase
+from config.firebase_config import get_firestore_client, initialize_firebase
 from services import firestore_listener
 from services.ai_service import initialize_gemini
+from services.insights_service import InsightsError, get_insights
 import uvicorn
 
 logging.basicConfig(
@@ -151,6 +152,15 @@ Provide a helpful, accurate response."""
     except Exception as e:
         logger.error(f"Chat error for {uid}: {str(e)}")
         raise HTTPException(status_code=500, detail="Chat is temporarily unavailable. Please try again.")
+
+
+@app.post("/insights")
+def insights(uid: str = Depends(require_user)):
+    """'Explore next' suggestions for the Progress tab, cached per user per day."""
+    try:
+        return get_insights(get_firestore_client(), uid)
+    except InsightsError as e:
+        raise HTTPException(status_code=503, detail=str(e))
 
 
 if __name__ == "__main__":
