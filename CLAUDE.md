@@ -49,7 +49,8 @@ Tools on this PC:
 
 ## Architecture
 - **frontend/**: Next.js (static export, `output: "export"`), TypeScript,
-  Tailwind, Radix/shadcn UI. Firebase Auth (Google only today) and Firestore.
+  Tailwind, Radix/shadcn UI. Firebase Auth (Google only in the UI so far;
+  Email/Password is enabled in the console) and Firestore.
   Almost everything is in `frontend/app/page.tsx` (~1000 lines, tabs:
   library / add / chat). Deployed to GitHub Pages by
   `.github/workflows/deploy-pages.yml` on every push to `master`. The
@@ -62,13 +63,29 @@ Tools on this PC:
   1. `services/firestore_listener.py` picks it up with a collection-group listener.
   2. `services/video_service.py` runs yt-dlp. It downloads and parses the
      English caption track (json3/vtt/xml) and falls back to the description.
-  3. `services/ai_service.py` runs **one grounded `gemini-2.5-flash` call**,
-     which returns JSON: summary, category, tags, `fact_check{status, reason,
-     source_link}`, `urgency_score`, plus grounding `sources`.
-  4. The listener maps the result to the UI status
-     (`verified` / `misleading` / `unverified` / `error`).
+  3. **Cache:** the listener first looks in the backend-only `video_cache`
+     collection. Entries are keyed by a sha256 of yt-dlp's `extractor_key:id`
+     (e.g. `TikTok:7593294192688811277`), so share links and short links
+     match. They're kept for 7 days and shared across users.
+     - **New items** reuse a cache entry when one exists.
+     - **"Check again"** (the `check_again` flag) reuses the cache only when
+       its entry is newer than the item's `analyzed_at`. Otherwise it runs a
+       fresh Gemini call.
+  4. On a cache miss, `services/ai_service.py` runs **one grounded
+     `gemini-2.5-flash` call** with the accuracy rubric. It returns
+     `accuracy_score`, `verdict`, `one_line_summary`, `highlight`,
+     `main_false_claim`, `conclusion`, `trust_note`, `score_reason`,
+     `sources_for` / `sources_against` (real URLs, matched to grounding
+     results), plus summary, category and tags.
+  5. Item `status`: true → `verified`, half_truth → `misleading`, false →
+     `false`, unverified → `unverified`. A failed check is `error`, with a
+     friendly `error_message`; the UI shows it as grey Unverified with a
+     "Check again" button.
+- **Placeholder data:** 17 pre-rubric items have hand-written verdicts marked
+  `placeholder: true`, made for UI testing. They're never cached, and any
+  real check clears the flag.
 - **Chat:** `POST /chat` in `main.py`, using `gemini-3.1-flash-lite` without
-  grounding.
+  grounding. It requires a Firebase ID token (`Authorization: Bearer ...`).
 - **Don't run `tests/model_testing.py`.** It was a one-time check of which
   models allow grounding (only `gemini-2.5-flash` does), and it spends about
   6 grounded calls per run.
@@ -87,11 +104,7 @@ Tools on this PC:
 - A friend's frontend changes (new **Stats page** and an **interactive
   "new video" animation**) will be pasted in. Merge them carefully into the
   current `page.tsx` structure.
-- `backend/services/firestore_listener.py` also listens to a `demo_items`
-  collection that the frontend never uses. It's dead code, so remove it or
-  ignore it.
-
-## Firestore rules (`firestore.rules`, deploy from the Firebase console)
+## Firestore rules (`firestore.rules`, deploy with `firebase deploy --only firestore:rules`)
 - The rules currently only allow a signed-in user to read and write
   `users/{uid}` and `users/{uid}/items/*`. **Any new client-side collection
   is denied by default.** Add a rule when adding:
@@ -185,36 +198,16 @@ Tools on this PC:
   sign-up, sign-in and password reset.
 
 ### 3. Bugs reported
-- **Chat layout:** when a chat gets long, the background doesn't extend or
-  repeat, and the footer stays fixed, so the chat box "leaks" below it. Fix
-  the layout so the messages area scrolls inside a fixed-height container.
+- **Chat look:** the overflow is fixed (`d071efc`), but Atinder doesn't like
+  how the chat looks yet. He'll describe what he wants.
 
-### 4. Issues found in code review (not yet fixed)
-- **Fake "Unverified" on AI failure:** `get_fallback_analysis()` in
-  `ai_service.py` returns a placeholder when Gemini errors or hits quota, and
-  the listener logs "processed successfully". The item should be set to
-  `error` with a friendly "AI analysis temporarily unavailable, retry later"
-  message.
-- **Pointless retries:** a daily-quota 429 is retried 3 times. Don't retry
-  `RESOURCE_EXHAUSTED` daily limits.
-- **No per-video cache:** the same URL analyzed by two users calls Gemini
-  twice. Cache results by normalized URL (e.g. a `video_cache/{hash}` doc).
-- **`/chat` has no auth:** anyone can call it and burn the Gemini quota.
-  Verify the Firebase ID token (send `Authorization: Bearer <idToken>` from
-  the frontend and use `firebase_admin.auth.verify_id_token` in the backend).
-- **"Recent activity" shows unverified/error items as processing forever:**
-  `page.tsx` ~line 237 maps any status that isn't verified/misleading to
-  `'processing'`.
-- **Retry may not re-run:** `processed_items` in the listener is an
-  in-memory set that is never cleared, so an item set back to `processing`
-  isn't reprocessed until the server restarts. Remove the key when an item
-  finishes.
-- **Transcript truncated:** only the first 1000 characters go into the
-  prompt. Fine for Shorts, but consider ~3000.
-- **Fragile JSON parsing** (code-fence stripping). Validate the fields and
-  fall back cleanly.
+### 4. Issues found in code review (still open)
 - **Stale docs:** README/docs still mention Vercel for the frontend. It's on
   GitHub Pages.
+
+These are fixed: fake Unverified on AI failure, daily-quota retries, the
+per-video cache, `/chat` auth, Recent Activity stuck on processing, retry not
+re-running, the 1000-character transcript limit, and fragile JSON parsing.
 
 ### 5. Testing
 - Use a user-testing plugin or skill if one is available and not too

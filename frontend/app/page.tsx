@@ -50,7 +50,9 @@ type TabType = "library" | "add" | "chat"
 
 type VideoStatus = "processing" | "verified" | "misleading" | "false" | "unverified" | "error"
 type Verdict = "true" | "half_truth" | "false" | "unverified"
-type DisplayState = Verdict | "processing" | "error"
+// Failed checks ('error') display as Unverified, so every card has one of the
+// four verdicts or is still processing.
+type DisplayState = Verdict | "processing"
 type FilterType = "all" | Verdict | "processing"
 
 type RecentActivity = {
@@ -98,7 +100,8 @@ type VideoItem = {
 // Resolves what a card should show. New items carry `verdict`; older items
 // only have the legacy status + fact_check.status, which map onto the bands.
 function getDisplayState(item: VideoItem): DisplayState {
-  if (item.status === "processing" || item.status === "error") return item.status
+  if (item.status === "processing") return "processing"
+  if (item.status === "error") return "unverified"
   if (item.verdict) return item.verdict
   if (item.status === "verified") return "true"
   if (item.status === "false" || item.fact_check?.status === "False") return "false"
@@ -207,7 +210,7 @@ function HighlightedText({ text, highlight, className }: { text: string; highlig
 // Shown on the thumbnail until hover so the verdict reads at a glance: red X,
 // yellow warning, green check, or grey question mark, plus the score.
 function VerdictOverlay({ state, score }: { state: DisplayState; score?: number | null }) {
-  if (state === "processing" || state === "error") return null
+  if (state === "processing") return null
   const meta = VERDICT_META[state]
   const iconClass = cn("drop-shadow-[0_4px_12px_rgba(0,0,0,0.8)]", meta.icon)
   return (
@@ -534,20 +537,20 @@ export default function ChestifyApp() {
     }
   }
 
-  // Sends the item back to 'processing' so the backend listener re-runs it.
-  // Recheck (fresh) skips the shared analysis cache and spends limited daily
-  // AI quota, so it asks first; Retry after an error may reuse the cache.
-  const handleRecheck = async (e: React.MouseEvent, item: VideoItem, fresh = true) => {
+  // Sends the item back to 'processing' so the backend checks it again. The
+  // backend reuses a cached analysis newer than the card's own, otherwise it
+  // runs a fresh fact-check, which spends limited daily AI quota.
+  const handleRecheck = async (e: React.MouseEvent, item: VideoItem) => {
     e.preventDefault()
     e.stopPropagation()
     if (!user) return
-    if (fresh && !window.confirm("Recheck uses one AI fact-check (limited per day). Continue?")) return
+    if (!window.confirm("Checking again may use one of today's AI fact-checks. Continue?")) return
 
     try {
       await updateDoc(doc(db, "users", user.uid, "items", item.id), {
         status: "processing",
         error_message: "",
-        force_refresh: fresh,
+        check_again: true,
       })
     } catch (error) {
       console.error("Recheck failed:", error)
@@ -569,7 +572,7 @@ export default function ChestifyApp() {
       `Title: ${item.title}`,
       `URL: ${item.url}`,
       `Summary: ${item.summary}`,
-      `Verdict: ${state === "processing" || state === "error" ? state : VERDICT_META[state].label}`,
+      `Verdict: ${state === "processing" ? state : VERDICT_META[state].label}`,
       `Accuracy score: ${typeof item.accuracy_score === "number" ? `${item.accuracy_score}/10` : "not scored"}`,
       item.score_reason && `Score reason: ${item.score_reason}`,
       item.one_line_summary && `What's actually true: ${item.one_line_summary}`,
@@ -834,8 +837,12 @@ export default function ChestifyApp() {
               <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
                 {filteredItems.map((item) => {
                   const state = getDisplayState(item)
-                  const meta = state === "processing" || state === "error" ? null : VERDICT_META[state]
-                  const oneLine = item.one_line_summary || item.fact_check?.reason || ""
+                  const meta = state === "processing" ? null : VERDICT_META[state]
+                  // A check that couldn't run shows as grey Unverified with the reason.
+                  const failed = item.status === "error"
+                  const oneLine = failed
+                    ? item.error_message || "We couldn't finish checking this video."
+                    : item.one_line_summary || item.fact_check?.reason || ""
                   const sources = cardSources(item)
 
                   return (
@@ -859,7 +866,6 @@ export default function ChestifyApp() {
                           (isDark
                             ? "border-purple-400/30 hover:border-purple-400/60 hover:shadow-[0_20px_50px_-12px_rgba(168,85,247,0.4)]"
                             : "border-purple-300 hover:border-purple-400 hover:shadow-[0_20px_50px_-12px_rgba(168,85,247,0.3)]"),
-                        state === "error" && (isDark ? "border-zinc-500/30" : "border-zinc-300"),
                     )}
                     childrenClassName="inset-0 flex flex-col justify-between p-6"
                   >
@@ -875,11 +881,10 @@ export default function ChestifyApp() {
                         <ExternalLink className="w-3 h-3" />
                       </a>
                       <div>
-                        {state !== "processing" && state !== "error" && (
+                        {state !== "processing" && (
                           <ScorePill state={state} score={item.accuracy_score} className="px-2.5 py-0.5 text-xs" />
                         )}
                         {state === "processing" && <Loader2 className="w-5 h-5 animate-spin text-purple-400" />}
-                        {state === "error" && <XCircle className="w-5 h-5 text-zinc-400" />}
                       </div>
                     </div>
 
@@ -906,31 +911,22 @@ export default function ChestifyApp() {
                           <div className="h-3 rounded animate-pulse bg-white/20" />
                           <div className="h-3 rounded animate-pulse w-3/4 bg-white/20" />
                         </div>
-                      ) : state === "error" || !meta ? (
-                        <div className="space-y-2">
-                          <p className="text-sm font-semibold text-zinc-300">Analysis unavailable</p>
-                          <p className="text-xs text-white/80">
-                            {item.error_message || "Please try again later."}
-                          </p>
-                          <Button
-                            size="sm"
-                            onClick={(e) => handleRecheck(e, item, false)}
-                            className="w-full rounded-full text-xs border bg-zinc-500/30 text-zinc-200 hover:bg-zinc-500/40 border-zinc-400/40"
-                          >
-                            <RotateCw className="w-3 h-3 mr-1" />
-                            Retry
-                          </Button>
-                        </div>
-                      ) : (
+                      ) : meta ? (
                         <div className="space-y-3">
                           <div className={cn("p-3 rounded-lg border backdrop-blur-sm", meta.box)}>
                             <p className={cn("text-xs font-semibold mb-1", meta.boxText)}>
                               {meta.label}
+                              {failed && " · CHECK FAILED"}
                             </p>
-                            <p className={cn("text-sm text-white/90 mb-2 leading-snug", !item.one_line_summary && "text-xs line-clamp-3")}>
-                              <HighlightedText text={oneLine} highlight={item.highlight} className={meta.highlight} />
+                            <p
+                              className={cn(
+                                "text-sm text-white/90 mb-2 leading-snug",
+                                !failed && !item.one_line_summary && "text-xs line-clamp-3",
+                              )}
+                            >
+                              <HighlightedText text={oneLine} highlight={failed ? undefined : item.highlight} className={meta.highlight} />
                             </p>
-                            {sources.length ? (
+                            {failed ? null : sources.length ? (
                               <div className="flex flex-wrap gap-x-3 gap-y-1">
                                 {sources.map((source) => (
                                   <a
@@ -952,25 +948,27 @@ export default function ChestifyApp() {
                           </div>
 
                           <div className="flex gap-2">
+                            {!failed && (
+                              <Button
+                                size="sm"
+                                onClick={(e) => handleOpenAIAnalysis(e, item)}
+                                className={cn("flex-1 rounded-full text-xs border", meta.button)}
+                              >
+                                AI Analysis
+                              </Button>
+                            )}
                             <Button
                               size="sm"
-                              onClick={(e) => handleOpenAIAnalysis(e, item)}
-                              className={cn("flex-1 rounded-full text-xs border", meta.button)}
-                            >
-                              AI Analysis
-                            </Button>
-                            <Button
-                              size="sm"
-                              title="Re-run the fact-check"
+                              title="Check this video again"
                               onClick={(e) => handleRecheck(e, item)}
-                              className={cn("rounded-full text-xs border", meta.button)}
+                              className={cn("rounded-full text-xs border", failed && "flex-1", meta.button)}
                             >
                               <RotateCw className="w-3 h-3 mr-1" />
-                              Recheck
+                              Check again
                             </Button>
                           </div>
                         </div>
-                      )}
+                      ) : null}
                     </div>
                   </DirectionAwareHover>
                   </div>
@@ -1075,9 +1073,6 @@ export default function ChestifyApp() {
                               isDark ? "text-purple-400" : "text-purple-600",
                             )}
                           />
-                        )}
-                        {activity.state === "error" && (
-                          <AlertTriangle className="w-4 h-4 flex-shrink-0 text-zinc-500" />
                         )}
                         <span className={cn("text-sm truncate", isDark ? "text-white/80" : "text-neutral-700")}>
                           {activity.url}

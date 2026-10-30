@@ -41,27 +41,43 @@ def _cache_ref(db, video_key: str):
 
 
 def get_cached_analysis(db, video_key: str):
-    """Return a fresh cached analysis for this video, or None."""
+    """Return (result, created_at) for a fresh cached analysis of this video, or None."""
     snap = _cache_ref(db, video_key).get()
     if not snap.exists:
         return None
     cached = snap.to_dict() or {}
     created = cached.get("created_at")
-    if cached.get("version") != CACHE_VERSION or not created:
+    if cached.get("version") != CACHE_VERSION or not created or not cached.get("result"):
         return None
     if datetime.now(timezone.utc) - created > CACHE_MAX_AGE:
         return None
-    return cached.get("result")
+    return cached["result"], created
+
+
+def cache_is_usable(item_data: dict, cache_created) -> bool:
+    """
+    New items always reuse the cache. "Check again" reuses it only when it's
+    newer than the card's own analysis (or the card never had one, e.g. after
+    an error); otherwise the user gets a genuinely fresh Gemini check.
+    """
+    check_again = item_data.get('check_again') or item_data.get('force_refresh')
+    if not check_again:
+        return True
+    analyzed_at = item_data.get('analyzed_at')
+    return analyzed_at is None or cache_created > analyzed_at
 
 
 def store_cached_analysis(db, video_key: str, url: str, result: dict):
+    """Cache an analysis and return its timestamp (also stored as the item's analyzed_at)."""
+    created = datetime.now(timezone.utc)
     _cache_ref(db, video_key).set({
         "video_key": video_key,
         "url": url,
         "version": CACHE_VERSION,
-        "created_at": datetime.now(timezone.utc),
+        "created_at": created,
         "result": result,
     })
+    return created
 
 
 def start_firestore_listener():
@@ -157,15 +173,15 @@ def process_item(item_ref, item_id: str, item_data: dict):
 
         db = get_firestore_client()
         video_key = video_info['video_key']
-        # Recheck sets force_refresh so the user gets a genuinely new analysis.
-        force_refresh = bool(item_data.get('force_refresh'))
 
-        ai_result = None
-        if not force_refresh:
-            try:
-                ai_result = get_cached_analysis(db, video_key)
-            except Exception:
-                logger.exception("Cache lookup failed; analyzing instead")
+        ai_result = analyzed_at = None
+        try:
+            cached = get_cached_analysis(db, video_key)
+            if cached and cache_is_usable(item_data, cached[1]):
+                ai_result, analyzed_at = cached
+        except Exception:
+            logger.exception("Cache lookup failed; analyzing instead")
+
         if ai_result:
             logger.info(f"Cache hit for {video_key}; skipping Gemini")
         else:
@@ -175,8 +191,9 @@ def process_item(item_ref, item_id: str, item_data: dict):
                 transcript=video_info['transcript'],
                 url=url
             )
+            analyzed_at = datetime.now(timezone.utc)
             try:
-                store_cached_analysis(db, video_key, url, ai_result)
+                analyzed_at = store_cached_analysis(db, video_key, url, ai_result)
             except Exception:
                 logger.exception("Cache write failed")
 
@@ -184,7 +201,9 @@ def process_item(item_ref, item_id: str, item_data: dict):
             **ai_result,
             'status': VERDICT_STATUS[ai_result['verdict']],
             'error_message': '',
+            'analyzed_at': analyzed_at,
             'placeholder': False,
+            'check_again': False,
             'force_refresh': False
         }
 
