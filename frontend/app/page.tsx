@@ -11,10 +11,22 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { DirectionAwareHover } from "@/components/direction-aware-hover"
-import { CheckCircle2, AlertTriangle, Loader2, Send, Plus, Package, Clock, XCircle, HelpCircle, X, RotateCw, ExternalLink } from "lucide-react"
+import { CheckCircle2, AlertTriangle, Loader2, Send, Plus, Package, Clock, XCircle, HelpCircle, X, RotateCw, ExternalLink, History, MessageSquare } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { auth, db, googleProvider } from "@/lib/firebase/config"
-import { collection, doc, query, onSnapshot, orderBy, Timestamp, updateDoc } from "firebase/firestore"
+import {
+  addDoc,
+  collection,
+  doc,
+  getDocs,
+  limit,
+  onSnapshot,
+  orderBy,
+  query,
+  Timestamp,
+  updateDoc,
+  where,
+} from "firebase/firestore"
 import { onAuthStateChanged, signInWithPopup, signOut, type User } from "firebase/auth"
 import { addVideoToFirestore } from "@/lib/firestore-helpers"
 import { ThemeControls } from "@/components/theme-controls"
@@ -95,6 +107,24 @@ type VideoItem = {
     reason?: string
     source_link?: string
   }
+}
+
+// Saved chats live in users/{uid}/chats/{chatId}, messages in its
+// messages subcollection. A chat started from a video card keeps that
+// video's analysis as context and is reopened for the same video.
+type ChatMessage = {
+  id: string
+  role: "user" | "assistant"
+  content: string
+}
+
+type ChatSummary = {
+  id: string
+  title: string
+  video_id?: string | null
+  video_title?: string | null
+  context?: string | null
+  updated_at?: TimestampValue
 }
 
 // Resolves what a card should show. New items carry `verdict`; older items
@@ -332,13 +362,17 @@ export default function ChestifyApp() {
   const [urlInput, setUrlInput] = useState("")
   const [isAdding, setIsAdding] = useState(false)
   const [chatInput, setChatInput] = useState("")
-  const [messages, setMessages] = useState<Array<{ role: "user" | "assistant"; content: string }>>([])
+  const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [chats, setChats] = useState<ChatSummary[]>([])
+  const [activeChatId, setActiveChatId] = useState<string | null>(null)
+  const [isReplying, setIsReplying] = useState(false)
+  const [chatError, setChatError] = useState<string | null>(null)
+  const [showHistory, setShowHistory] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   // Touch screens can't hover, so a tap reveals a card's details instead of
   // opening the video; the "Watch on ..." link inside opens it.
   const [canHover, setCanHover] = useState(true)
   const [revealedId, setRevealedId] = useState<string | null>(null)
-  const [currentVideoContext, setCurrentVideoContext] = useState<string | null>(null)
   const [isDark, setIsDark] = useState(true)
   const [activeTheme, setActiveTheme] = useState<keyof typeof themes>("fire-ice")
   const [recentActivity, setRecentActivity] = useState<RecentActivity[]>([])
@@ -373,10 +407,38 @@ export default function ChestifyApp() {
     return () => media.removeEventListener("change", update)
   }, [])
 
+  // Lists the user's 30 most recently used chats for the history panel.
+  useEffect(() => {
+    if (!user) {
+      setChats([])
+      setActiveChatId(null)
+      return
+    }
+    const chatsQuery = query(collection(db, "users", user.uid, "chats"), orderBy("updated_at", "desc"), limit(30))
+    return onSnapshot(chatsQuery, (snapshot) => {
+      setChats(snapshot.docs.map((d) => ({ id: d.id, ...d.data() }) as ChatSummary))
+    })
+  }, [user])
+
+  // Streams the open chat's messages in order; an empty chat shows the prompt.
+  useEffect(() => {
+    if (!user || !activeChatId) {
+      setMessages([])
+      return
+    }
+    const messagesQuery = query(
+      collection(db, "users", user.uid, "chats", activeChatId, "messages"),
+      orderBy("created_at", "asc"),
+    )
+    return onSnapshot(messagesQuery, (snapshot) => {
+      setMessages(snapshot.docs.map((d) => ({ id: d.id, ...d.data() }) as ChatMessage))
+    })
+  }, [user, activeChatId])
+
   // Keeps the newest chat message in view inside the scrolling message list.
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" })
-  }, [messages])
+  }, [messages, isReplying])
 
   // Writes the active theme key to localStorage whenever the user changes it.
   useEffect(() => {
@@ -487,16 +549,47 @@ export default function ChestifyApp() {
     }
   }
 
-  // Appends the user's question, posts its saved-video context to the backend
-  // /chat endpoint, and appends either the AI response or an error message.
+  // Creates a saved chat and makes it the open one.
+  const createChat = async (fields: Partial<Omit<ChatSummary, "id">>) => {
+    if (!user) throw new Error("You must be signed in to chat.")
+    const now = Timestamp.now()
+    const chatRef = await addDoc(collection(db, "users", user.uid, "chats"), {
+      title: "New chat",
+      video_id: null,
+      video_title: null,
+      context: null,
+      created_at: now,
+      updated_at: now,
+      ...fields,
+    })
+    setActiveChatId(chatRef.id)
+    return chatRef.id
+  }
+
+  const addChatMessage = async (chatId: string, role: ChatMessage["role"], content: string) => {
+    if (!user) return
+    const chatRef = doc(db, "users", user.uid, "chats", chatId)
+    await addDoc(collection(chatRef, "messages"), { role, content, created_at: Timestamp.now() })
+    await updateDoc(chatRef, { updated_at: Timestamp.now() })
+  }
+
+  // Saves the question, sends it with the chat's video context and recent
+  // turns to the backend /chat endpoint, and saves the reply. Errors are
+  // shown under the chat but not saved.
   const handleSendMessage = async () => {
-    if (!chatInput.trim()) return
-    
-    const userMessage = chatInput
-    setMessages([...messages, { role: "user", content: userMessage }])
+    const userMessage = chatInput.trim()
+    if (!userMessage || !user || isReplying) return
+
+    const history = messages.slice(-10).map(({ role, content }) => ({ role, content }))
+    const context = chats.find((c) => c.id === activeChatId)?.context ?? null
     setChatInput("")
+    setChatError(null)
+    setIsReplying(true)
 
     try {
+      const chatId = activeChatId ?? (await createChat({ title: userMessage.slice(0, 60) }))
+      await addChatMessage(chatId, "user", userMessage)
+
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
       // The backend only answers signed-in users, so send the Firebase ID token.
       const idToken = await auth.currentUser?.getIdToken()
@@ -506,35 +599,36 @@ export default function ChestifyApp() {
           "Content-Type": "application/json",
           ...(idToken ? { Authorization: `Bearer ${idToken}` } : {}),
         },
-        body: JSON.stringify({
-          message: userMessage,
-          context: currentVideoContext,
-        }),
+        body: JSON.stringify({ message: userMessage, context, history }),
       })
 
       const data = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(data.detail || "Chat API failed")
 
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          content: data.response,
-        },
-      ])
+      await addChatMessage(chatId, "assistant", data.response)
     } catch (error) {
       console.error("Chat error:", error)
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          content:
-            error instanceof Error && error.message !== "Chat API failed" && !error.message.startsWith("Failed to fetch")
-              ? error.message
-              : "Sorry, I encountered an error. Please try again.",
-        },
-      ])
+      setChatError(
+        error instanceof Error && error.message !== "Chat API failed" && !error.message.startsWith("Failed to fetch")
+          ? error.message
+          : "Sorry, I encountered an error. Please try again.",
+      )
+    } finally {
+      setIsReplying(false)
     }
+  }
+
+  // Opens an empty chat; it is saved once the first message is sent.
+  const handleNewChat = () => {
+    setActiveChatId(null)
+    setChatError(null)
+    setShowHistory(false)
+  }
+
+  const handleSelectChat = (chatId: string) => {
+    setActiveChatId(chatId)
+    setChatError(null)
+    setShowHistory(false)
   }
 
   // Sends the item back to 'processing' so the backend checks it again. The
@@ -559,11 +653,13 @@ export default function ChestifyApp() {
   }
 
   // Prevents the card click from opening the video, formats its stored
-  // analysis as chat context, and opens the chat tab with an initial prompt.
-  const handleOpenAIAnalysis = (e: React.MouseEvent, item: VideoItem) => {
+  // analysis as chat context, and reopens this video's saved chat (or starts
+  // one with a greeting) in the chat tab.
+  const handleOpenAIAnalysis = async (e: React.MouseEvent, item: VideoItem) => {
     e.preventDefault()
     e.stopPropagation()
-    
+    if (!user) return
+
     const state = getDisplayState(item)
     const sourceLines = [...(item.sources_against || []), ...(item.sources_for || [])]
       .map((s) => `- ${s.domain}: ${s.point || s.title} (${s.url})`)
@@ -583,20 +679,47 @@ export default function ChestifyApp() {
     ]
       .filter(Boolean)
       .join("\n")
-    setCurrentVideoContext(context)
-    
-    setMessages([{
-      role: "assistant",
-      content: `I've loaded the analysis for "${item.title}". What would you like to know about this video?`
-    }])
-    
+
+    setChatError(null)
+    setShowHistory(false)
     setActiveTab("chat")
+
+    try {
+      const chatsRef = collection(db, "users", user.uid, "chats")
+      const existing = await getDocs(query(chatsRef, where("video_id", "==", item.id), limit(1)))
+      if (!existing.empty) {
+        // Refresh the context in case the video was checked again since.
+        const chatDoc = existing.docs[0]
+        await updateDoc(chatDoc.ref, { context, video_title: item.title, updated_at: Timestamp.now() })
+        setActiveChatId(chatDoc.id)
+        return
+      }
+      const chatId = await createChat({
+        title: item.title.slice(0, 60),
+        video_id: item.id,
+        video_title: item.title,
+        context,
+      })
+      await addChatMessage(
+        chatId,
+        "assistant",
+        `I've loaded the analysis for "${item.title}". What would you like to know about this video?`,
+      )
+    } catch (error) {
+      console.error("Couldn't open video chat:", error)
+      setChatError("Couldn't open the chat for this video. Please try again.")
+    }
   }
 
   // Copies a predefined starter question into the controlled chat input.
   const handleStarterQuestion = (question: string) => {
     setChatInput(question)
   }
+
+  const activeChat = chats.find((c) => c.id === activeChatId)
+  const chatSecondaryButton = isDark
+    ? "bg-white/5 border-white/20 text-white/70 hover:bg-white/10 hover:text-white"
+    : "bg-neutral-50 border-neutral-300 text-neutral-600 hover:bg-neutral-100"
 
   const allItems = firestoreItems
   
@@ -1093,7 +1216,7 @@ export default function ChestifyApp() {
             </div>
           )}
           {activeTab === "chat" && (
-            <div className="max-w-4xl mx-auto">
+            <div className="max-w-5xl mx-auto">
               <h2
                 className={cn(
                   "text-4xl font-semibold bg-gradient-to-r bg-clip-text text-transparent mb-6",
@@ -1112,14 +1235,87 @@ export default function ChestifyApp() {
                   )}
                 >
                   <CardHeader className={cn("border-b", isDark ? "border-white/10" : "border-neutral-200")}>
-                    <CardTitle className={cn("text-xl font-light", isDark ? "text-white" : "text-neutral-900")}>
-                      Q&A Compass
-                    </CardTitle>
-                    <CardDescription className={cn(isDark ? "text-white/60" : "text-neutral-600")}>
-                      Ask questions about your saved videos
-                    </CardDescription>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <CardTitle className={cn("text-xl font-light", isDark ? "text-white" : "text-neutral-900")}>
+                          Q&A Compass
+                        </CardTitle>
+                        <CardDescription className={cn("truncate", isDark ? "text-white/60" : "text-neutral-600")}>
+                          {activeChat?.video_title
+                            ? `About: ${activeChat.video_title}`
+                            : "Ask questions about your saved videos"}
+                        </CardDescription>
+                      </div>
+                      <div className="flex gap-2 flex-shrink-0">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setShowHistory((v) => !v)}
+                          className={cn("md:hidden rounded-full text-xs", chatSecondaryButton)}
+                        >
+                          <History className="w-3 h-3 mr-1" />
+                          History
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={handleNewChat}
+                          className={cn("rounded-full text-xs", chatSecondaryButton)}
+                        >
+                          <Plus className="w-3 h-3 mr-1" />
+                          New chat
+                        </Button>
+                      </div>
+                    </div>
                   </CardHeader>
-                  <CardContent className="flex-1 min-h-0 flex flex-col p-6">
+                  <CardContent className="flex-1 min-h-0 flex p-0">
+                    <aside
+                      className={cn(
+                        showHistory ? "flex" : "hidden",
+                        "md:flex w-full md:w-60 flex-shrink-0 flex-col gap-1 overflow-y-auto p-3 md:border-r",
+                        isDark ? "border-white/10" : "border-neutral-200",
+                      )}
+                    >
+                      <p className={cn("px-2 pb-1 text-xs font-semibold uppercase tracking-wide", isDark ? "text-white/40" : "text-neutral-500")}>
+                        Recent chats
+                      </p>
+                      {chats.length === 0 && (
+                        <p className={cn("px-2 text-sm", isDark ? "text-white/40" : "text-neutral-400")}>
+                          No saved chats yet.
+                        </p>
+                      )}
+                      {chats.map((chat) => (
+                        <button
+                          key={chat.id}
+                          onClick={() => handleSelectChat(chat.id)}
+                          className={cn(
+                            "w-full rounded-lg px-3 py-2 text-left transition-colors",
+                            chat.id === activeChatId
+                              ? isDark
+                                ? currentTheme.activeTab
+                                : currentTheme.activeTabLight
+                              : isDark
+                                ? "text-white/70 hover:bg-white/5"
+                                : "text-neutral-700 hover:bg-neutral-100",
+                          )}
+                        >
+                          <span className="flex items-center gap-2 text-sm">
+                            {chat.video_id ? (
+                              <Package className="w-3 h-3 flex-shrink-0 opacity-70" />
+                            ) : (
+                              <MessageSquare className="w-3 h-3 flex-shrink-0 opacity-70" />
+                            )}
+                            <span className="truncate">{chat.title}</span>
+                          </span>
+                          {chat.updated_at && (
+                            <span className={cn("block pl-5 text-[11px]", isDark ? "text-white/40" : "text-neutral-500")}>
+                              {formatShortDate(chat.updated_at)}
+                            </span>
+                          )}
+                        </button>
+                      ))}
+                    </aside>
+                    <div className={cn(showHistory ? "hidden" : "flex", "md:flex flex-1 min-w-0 min-h-0 flex-col p-6")}>
                     <div className="flex-1 min-h-0 overflow-y-auto space-y-4 mb-4 pr-1">
                       {messages.length === 0 ? (
                         <div className="h-full flex items-center justify-center">
@@ -1128,9 +1324,9 @@ export default function ChestifyApp() {
                           </p>
                         </div>
                       ) : (
-                        messages.map((msg, idx) => (
+                        messages.map((msg) => (
                           <div
-                            key={idx}
+                            key={msg.id}
                             className={cn(
                               "p-4 rounded-lg max-w-[80%]",
                               msg.role === "user"
@@ -1180,6 +1376,18 @@ export default function ChestifyApp() {
                           </div>
                         ))
                       )}
+                      {isReplying && (
+                        <div
+                          className={cn(
+                            "mr-auto flex items-center gap-2 rounded-lg p-4 text-sm",
+                            isDark ? "bg-white/5 border border-white/10 text-white/60" : "bg-neutral-100 border border-neutral-200 text-neutral-500",
+                          )}
+                        >
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          Thinking...
+                        </div>
+                      )}
+                      {chatError && <p className="text-sm text-red-400">{chatError}</p>}
                       <div ref={messagesEndRef} />
                     </div>
                     <div className="flex gap-2 mb-4 flex-wrap">
@@ -1237,7 +1445,7 @@ export default function ChestifyApp() {
                       />
                       <Button
                         onClick={handleSendMessage}
-                        disabled={!chatInput.trim()}
+                        disabled={!chatInput.trim() || isReplying}
                         className={cn(
                           "rounded-full border",
                           isDark
@@ -1247,6 +1455,7 @@ export default function ChestifyApp() {
                       >
                         <Send className="w-4 h-4" />
                       </Button>
+                    </div>
                     </div>
                   </CardContent>
                 </Card>

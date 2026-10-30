@@ -82,9 +82,25 @@ def health_check():
     }
 
 
+class ChatTurn(BaseModel):
+    role: str
+    content: str
+
+
 class ChatRequest(BaseModel):
     message: str
     context: str | None = None
+    # Recent earlier turns of this saved chat, oldest first.
+    history: list[ChatTurn] = []
+
+
+def format_history(history: list[ChatTurn]) -> str:
+    """Render up to the last 10 turns as a transcript for the prompt."""
+    lines = []
+    for turn in history[-10:]:
+        speaker = "User" if turn.role == "user" else "Assistant"
+        lines.append(f"{speaker}: {turn.content[:1500]}")
+    return "\n".join(lines)
 
 
 def require_user(authorization: str | None = Header(default=None)) -> str:
@@ -104,19 +120,21 @@ def chat(request: ChatRequest, uid: str = Depends(require_user)):
     """Chat endpoint with optional video context (signed-in users only)"""
     try:
         client = initialize_gemini()
-        
+        transcript = format_history(request.history)
+        earlier = f"\nConversation so far:\n{transcript}\n" if transcript else ""
+
         if request.context:
             prompt = f"""You are a helpful AI assistant for Chestify, an educational content platform.
 
 Context about the video being discussed:
 {request.context}
-
+{earlier}
 User question: {request.message}
 
 Provide a helpful, accurate response based on the video context and your knowledge. If the video contains misinformation, explain why and provide correct information."""
         else:
-            prompt = f"""You are a helpful AI assistant for Chestify, an educational content platform. 
-
+            prompt = f"""You are a helpful AI assistant for Chestify, an educational content platform.
+{earlier}
 User question: {request.message}
 
 Provide a helpful, accurate response."""

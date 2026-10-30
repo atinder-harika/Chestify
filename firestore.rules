@@ -8,6 +8,18 @@ service cloud.firestore {
       match /items/{itemId} {
         allow read, write: if request.auth != null && request.auth.uid == userId;
       }
+
+      // Saved chat history: each chat and its messages belong to one user.
+      match /chats/{chatId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+
+        match /messages/{messageId} {
+          allow read, write: if request.auth != null && request.auth.uid == userId;
+        }
+      }
     }
+
+    // video_cache is written only by the backend (Admin SDK bypasses rules),
+    // so clients have no access to it.
   }
 }
