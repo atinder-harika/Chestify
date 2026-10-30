@@ -228,6 +228,21 @@ re-running, the 1000-character transcript limit, and fragile JSON parsing.
     that don't address the claim, and have the one-liner say e.g. "No
     credible outlet reports this donation".
 
+### 7. Future goals (not important now; chat works well as is)
+- **Chat that knows the user's library (RAG):** today chat only knows a
+  video if it was opened through "AI Analysis", which passes that one video's
+  analysis as context. General chats know nothing about the user's saved
+  videos. Idea: before calling `/chat`, select the user's relevant items by
+  category, tags or keywords (or embeddings later), and send their stored
+  `one_line_summary`, verdict, score and sources as context. That lets it
+  answer "what have I saved about health?" or "which of my videos were
+  false?". The analyses are already grounded, so this needs **no extra
+  grounded calls**.
+- **Grounded search in chat:** for explaining a topic in depth, chat could
+  use Google Search grounding too. That spends the same scarce grounded quota
+  (about 3–4 a day) as fact-checks, so only add it behind an explicit "Search
+  the web" button, or once there's a paid tier.
+
 ## Purpose to keep in mind
 Make it obvious and useful: tell **lies, half-truths, and truths** apart at a
 glance, with credible sources. Every UI and prompt decision should serve that.
