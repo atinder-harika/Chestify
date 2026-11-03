@@ -13,6 +13,7 @@
 
 ## Later
 
+- Experiment: fact-check text posts (e.g. on X) and news articles, not just videos.
 - Chat that knows your whole library, not just one video.
 - Better extraction when a video has no captions.
 - Account deletion and data export.
