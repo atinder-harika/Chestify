@@ -4,7 +4,6 @@ import { Geist, Geist_Mono } from "next/font/google"
 import "./globals.css"
 
 /*
- * Owner: Chahatbir Singh
  * Review focus: Root document layout, fonts, metadata, and application shell.
  */
 
@@ -12,11 +11,11 @@ const _geist = Geist({ subsets: ["latin"] })
 const _geistMono = Geist_Mono({ subsets: ["latin"] })
 
 export const metadata: Metadata = {
-  title: "Chestify - Turn Noise into Knowledge",
+  title: "Chestify",
   description: "Turn short-form noise into a treasure chest of knowledge. AI-verified education for quality learning.",
   generator: "v0.app",
   icons: {
-    icon: "/favicon.ico",
+    icon: { url: "/brand/chestify-logo.svg", type: "image/svg+xml" },
   },
 }
 
