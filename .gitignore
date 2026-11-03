@@ -23,3 +23,8 @@ backend/.pytest_cache
 # --- IDEs ---
 .vscode
 .idea
+
+# --- Local only ---
+# Working notes for the AI assistant, and local preview config.
+CLAUDE.md
+.claude/
