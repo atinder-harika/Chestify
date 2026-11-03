@@ -1,19 +1,59 @@
 """
 Video Extraction Service using yt-dlp
 Extracts metadata and transcripts from YouTube Shorts, TikTok, etc.
-Owner: Christain Malan
 Review focus: Video metadata extraction, subtitle parsing, URL validation, and errors.
 """
 
+import base64
 import html
+import io
 import json
 import logging
 import re
 from typing import Any, Dict, Optional
 
+import requests
 import yt_dlp
+from PIL import Image
 
 logger = logging.getLogger(__name__)
+
+# Social-media thumbnail links are signed and expire within days, so a small
+# copy is stored on the item instead. It's cropped to the cards' 9:16 shape
+# first, so landscape (e.g. YouTube) images keep enough height to stay sharp.
+THUMBNAIL_SIZE = (450, 800)
+THUMBNAIL_QUALITY = 75
+
+
+def _crop_to_card(image: Image.Image) -> Image.Image:
+    """Center-crop to 9:16, the same part the card shows with object-cover."""
+    width, height = image.size
+    target = THUMBNAIL_SIZE[0] / THUMBNAIL_SIZE[1]
+    if width / height > target:
+        new_width = round(height * target)
+        left = (width - new_width) // 2
+        return image.crop((left, 0, left + new_width, height))
+    new_height = round(width / target)
+    top = (height - new_height) // 2
+    return image.crop((0, top, width, top + new_height))
+
+
+def thumbnail_data_url(thumbnail_url: str) -> Optional[str]:
+    """Download a thumbnail and return it as a small JPEG data URL, or None."""
+    if not thumbnail_url:
+        return None
+    try:
+        resp = requests.get(thumbnail_url, timeout=8, headers={"User-Agent": "Mozilla/5.0"})
+        resp.raise_for_status()
+        image = _crop_to_card(Image.open(io.BytesIO(resp.content)).convert("RGB"))
+        # Shrink only; small sources stay at their own resolution.
+        image.thumbnail(THUMBNAIL_SIZE, Image.LANCZOS)
+        out = io.BytesIO()
+        image.save(out, format="JPEG", quality=THUMBNAIL_QUALITY, optimize=True)
+        return "data:image/jpeg;base64," + base64.b64encode(out.getvalue()).decode("ascii")
+    except Exception as e:
+        logger.warning(f"Couldn't store thumbnail copy: {str(e)[:150]}")
+        return None
 
 
 class VideoExtractionError(Exception):
@@ -50,7 +90,9 @@ def extract_video_info(url: str) -> Dict[str, Any]:
             
             # Extract basic metadata
             title = info.get('title', 'Untitled')
-            thumbnail = info.get('thumbnail', '')
+            # Prefer a stored copy; keep the (expiring) link only if the download fails.
+            thumbnail = info.get('thumbnail', '') or ''
+            thumbnail = thumbnail_data_url(thumbnail) or thumbnail
             duration = info.get('duration', 0)
             uploader = info.get('uploader', 'Unknown')
             
