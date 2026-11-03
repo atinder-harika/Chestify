@@ -1,7 +1,6 @@
 "use client"
 
 /*
- * Owner: Dhruti Harshadbhai Prajapati
  * Review focus: Authenticated user profile display, account actions, and sign-out menu.
  */
 

@@ -1,5 +1,4 @@
 /*
- * Owner: Chahatbir Singh
  * Review focus: Firebase application initialization, Google Auth, and Firestore services.
  */
 

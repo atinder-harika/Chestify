@@ -1,7 +1,6 @@
 "use client"
 
 /*
- * Owner: Dhruti Harshadbhai Prajapati
  * Review focus: Theme selection and light/dark mode controls shared by both headers.
  */
 

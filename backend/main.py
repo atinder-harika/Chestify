@@ -1,7 +1,6 @@
 """
 Chestify Backend - FastAPI Server
 Listens to Firestore and processes educational content with AI fact-checking
-Owner: Atinder Singh Hari
 Review focus: FastAPI lifecycle, CORS, health checks, and chat API routing.
 """
 

@@ -1,5 +1,4 @@
 /*
- * Owner: Dhruti Harshadbhai Prajapati
  * Review focus: Authenticated creation of user-owned video processing records.
  */
 
