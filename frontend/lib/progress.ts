@@ -33,12 +33,17 @@ export type ProgressStats = {
   topicsExplored: number
   thisMonth: number
   streak: number
-  activity: { date: string; count: number }[]
+  // Calendar weeks (Sunday first), oldest first, for the heatmap. Days after
+  // today are marked `future` so the grid can leave them blank.
+  activity: ActivityDay[]
+  activityTotal: number
   topics: TopicStat[]
   badges: Badge[]
 }
 
-export const HEATMAP_DAYS = 84
+export type ActivityDay = { date: string; count: number; future: boolean }
+
+export const HEATMAP_WEEKS = 12
 
 // Local calendar day, so a streak follows the user's own midnight.
 export function dayKey(date: Date): string {
@@ -96,10 +101,14 @@ export function computeProgress(items: ProgressInput[], today = new Date()): Pro
     topicMap.set(name, topic)
   }
 
-  const activity = Array.from({ length: HEATMAP_DAYS }, (_, i) => {
-    const date = dayKey(addDays(today, i - (HEATMAP_DAYS - 1)))
-    return { date, count: perDay.get(date) || 0 }
+  // Start on the Sunday HEATMAP_WEEKS - 1 weeks before this week's Sunday.
+  const start = addDays(today, -today.getDay() - (HEATMAP_WEEKS - 1) * 7)
+  const todayKey = dayKey(today)
+  const activity = Array.from({ length: HEATMAP_WEEKS * 7 }, (_, i) => {
+    const date = dayKey(addDays(start, i))
+    return { date, count: perDay.get(date) || 0, future: date > todayKey }
   })
+  const activityTotal = activity.reduce((sum, day) => sum + day.count, 0)
 
   const topics = [...topicMap.values()].sort((a, b) => b.total - a.total || a.name.localeCompare(b.name))
   const streak = computeStreak(new Set(perDay.keys()), today)
@@ -122,6 +131,7 @@ export function computeProgress(items: ProgressInput[], today = new Date()): Pro
     thisMonth,
     streak,
     activity,
+    activityTotal,
     topics,
     badges: [
       badge("first", "First Check", "Check your first video", checked, 1),

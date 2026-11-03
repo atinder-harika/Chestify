@@ -1,7 +1,6 @@
 "use client"
 
 /*
- * Owner: Chahatbir Singh
  * Review focus: Direction-aware hover animation for video card imagery and details.
  */
 
@@ -17,6 +16,7 @@ export const DirectionAwareHover = ({
   imageUrl,
   children,
   overlay,
+  fallback,
   revealed = false,
   childrenClassName,
   imageClassName,
@@ -24,6 +24,9 @@ export const DirectionAwareHover = ({
 }: {
   imageUrl: string
   children: React.ReactNode | string
+  // Shown instead of the image when there's no URL or it fails to load
+  // (e.g. an expired social-media thumbnail link).
+  fallback?: React.ReactNode
   // Always-visible layer over the image (e.g. verdict marks); fades out on hover.
   overlay?: React.ReactNode
   // Shows the hover state without a pointer, for tap-to-reveal on touch screens.
@@ -35,6 +38,9 @@ export const DirectionAwareHover = ({
   const ref = useRef<HTMLDivElement>(null)
 
   const [direction, setDirection] = useState<"top" | "bottom" | "left" | "right" | string>("left")
+  // Remembers which URL failed, so a new URL gets a fresh attempt.
+  const [failedUrl, setFailedUrl] = useState<string | null>(null)
+  const showFallback = !!fallback && (!imageUrl || failedUrl === imageUrl)
 
   // Measures the pointer entry against the card bounds, calls getDirection,
   // and stores the matching motion variant name in component state.
@@ -99,13 +105,18 @@ export const DirectionAwareHover = ({
               ease: "easeOut",
             }}
           >
-            <img
-              alt="image"
-              className={cn("h-full w-full object-cover scale-[1.15]", imageClassName)}
-              width="1000"
-              height="1000"
-              src={imageUrl || "/placeholder.svg"}
-            />
+            {showFallback ? (
+              fallback
+            ) : (
+              <img
+                alt="image"
+                className={cn("h-full w-full object-cover scale-[1.15]", imageClassName)}
+                width="1000"
+                height="1000"
+                src={imageUrl || "/placeholder.svg"}
+                onError={() => setFailedUrl(imageUrl)}
+              />
+            )}
           </motion.div>
           <motion.div
             variants={textVariants}

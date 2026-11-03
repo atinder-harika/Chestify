@@ -1,18 +1,16 @@
 "use client"
 
 /*
- * Owner: Chahatbir Singh
  * Review focus: Main application flow, authentication, Firestore items, themes, and chat.
  */
 
 import { useState, useEffect, useMemo, useRef } from "react"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { DirectionAwareHover } from "@/components/direction-aware-hover"
-import { CheckCircle2, AlertTriangle, Loader2, Send, Plus, Package, Clock, XCircle, HelpCircle, X, RotateCw, ExternalLink, History, MessageSquare, Sparkles, TrendingUp, ShieldCheck, Trophy, Compass, Flame, LockKeyhole } from "lucide-react"
-import { computeProgress, type ProgressStats } from "@/lib/progress"
+import { CheckCircle2, AlertTriangle, Loader2, Send, Plus, XCircle, HelpCircle, X, RotateCw, ExternalLink, Trash2, ClipboardPaste, Search, PanelLeftClose, PanelLeftOpen, SquarePen, MoreVertical, Pin, PinOff, Pencil, MessageSquare, Sparkles, TrendingUp, ShieldCheck, Trophy, Compass, Flame, LockKeyhole } from "lucide-react"
+import { computeProgress, HEATMAP_WEEKS, type ProgressStats } from "@/lib/progress"
 import { cn } from "@/lib/utils"
 import { auth, db, googleProvider } from "@/lib/firebase/config"
 import {
@@ -26,13 +24,18 @@ import {
   query,
   Timestamp,
   updateDoc,
+  deleteDoc,
   where,
+  writeBatch,
 } from "firebase/firestore"
 import { onAuthStateChanged, signInWithPopup, signOut, type User } from "firebase/auth"
 import { addVideoToFirestore } from "@/lib/firestore-helpers"
 import { ThemeControls } from "@/components/theme-controls"
 import { UserProfileDropdown } from "@/components/user-profile-dropdown"
 import { EmailAuthForm } from "@/components/email-auth-form"
+import { ChestifyLogo } from "@/components/chestify-logo"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import { SmallThumb, ThumbnailPlaceholder, platformName } from "@/components/thumbnail-placeholder"
 import ReactMarkdown from "react-markdown"
 
 type TimestampValue = Timestamp | { seconds: number } | Date | string | number
@@ -80,12 +83,6 @@ type Verdict = "true" | "half_truth" | "false" | "unverified"
 // four verdicts or is still processing.
 type DisplayState = Verdict | "processing"
 type FilterType = "all" | Verdict | "processing"
-
-type RecentActivity = {
-  url: string
-  state: DisplayState
-  timestamp: string
-}
 
 type CitedSource = {
   title: string
@@ -139,6 +136,7 @@ type ChatSummary = {
   video_title?: string | null
   context?: string | null
   updated_at?: TimestampValue
+  pinned?: boolean
 }
 
 // Resolves what a card should show. New items carry `verdict`; older items
@@ -259,10 +257,11 @@ function VerdictOverlay({ state, score }: { state: DisplayState; score?: number 
   const iconClass = cn("drop-shadow-[0_4px_12px_rgba(0,0,0,0.8)]", meta.icon)
   return (
     <div className={cn("absolute inset-0 flex items-center justify-center", state === "false" && "bg-red-950/30")}>
-      {state === "false" && <X className={cn("w-2/3 h-2/3", iconClass)} strokeWidth={3} />}
+      {/* Same size and stroke for every verdict so no mark looks heavier than another. */}
+      {state === "false" && <XCircle className={cn("w-2/5 h-2/5", iconClass)} strokeWidth={2.5} />}
       {state === "half_truth" && <AlertTriangle className={cn("w-2/5 h-2/5", iconClass)} strokeWidth={2.5} />}
       {state === "true" && <CheckCircle2 className={cn("w-2/5 h-2/5", iconClass)} strokeWidth={2.5} />}
-      {state === "unverified" && <HelpCircle className={cn("w-1/3 h-1/3 opacity-80", iconClass)} strokeWidth={2} />}
+      {state === "unverified" && <HelpCircle className={cn("w-2/5 h-2/5", iconClass)} strokeWidth={2.5} />}
       <ScorePill state={state} score={score} className="absolute top-4 right-4 px-3 py-1 text-sm shadow-lg" />
     </div>
   )
@@ -287,34 +286,45 @@ function cardSources(item: VideoItem): CitedSource[] {
     .slice(0, 3)
 }
 
+// Active theme definition, passed to module-level components so their accents follow it.
+type Theme = (typeof themes)[keyof typeof themes]
+
+// "#rrggbb" + alpha (0-1) -> "#rrggbbaa", for glows and tints in theme colors.
+function withAlpha(hex: string, alpha: number): string {
+  return hex + Math.round(alpha * 255).toString(16).padStart(2, "0")
+}
+
 type StepState = "done" | "active" | "pending"
 
 // One row of the processing stepper (design from the dashboard prototype).
-function ProcessingStep({ state, title, detail, last }: { state: StepState; title: string; detail: string; last?: boolean }) {
+function ProcessingStep({ state, title, detail, last, theme }: { state: StepState; title: string; detail: string; last?: boolean; theme: Theme }) {
   return (
     <div className={cn("flex gap-3", state === "pending" && "opacity-50")}>
       <div className="flex flex-col items-center">
         {state === "done" ? (
-          <div className="flex h-6 w-6 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-red-500 text-xs text-green-300">
+          <div className={cn("flex h-6 w-6 items-center justify-center rounded-full bg-gradient-to-br text-xs", theme.buttonGradient, theme.buttonText)}>
             <CheckCircle2 className="h-4 w-4" />
           </div>
         ) : state === "active" ? (
-          <div className="flex h-6 w-6 items-center justify-center rounded-full border-2 border-blue-400 border-t-red-400 animate-spin">
-            <div className="h-2 w-2 rounded-full bg-blue-300" />
+          <div
+            className="flex h-6 w-6 items-center justify-center rounded-full border-2 animate-spin"
+            style={{ borderColor: theme.logo[0], borderTopColor: theme.logo[1] }}
+          >
+            <div className="h-2 w-2 rounded-full" style={{ background: theme.logo[0] }} />
           </div>
         ) : (
           <div className="h-6 w-6 rounded-full bg-white/25" />
         )}
         {!last && (
-          <div className={cn("h-7 w-px", state === "done" ? "bg-gradient-to-b from-blue-500 to-red-500" : "bg-white/15")} />
+          <div className={cn("h-7 w-px", state === "done" ? cn("bg-gradient-to-b", theme.buttonGradient) : "bg-white/15")} />
         )}
       </div>
       <div>
         <p className="text-sm font-medium text-white">
           {title}
-          {state === "active" && <span className="text-blue-300 animate-pulse"> •</span>}
+          {state === "active" && <span className={cn("animate-pulse", theme.icon)}> •</span>}
         </p>
-        <p className={cn("text-xs", state === "done" ? "text-green-400" : state === "active" ? "text-blue-300" : "text-white/60")}>
+        <p className={cn("text-xs", state === "done" ? "text-green-400" : state === "active" ? theme.icon : "text-white/60")}>
           {detail}
         </p>
       </div>
@@ -327,10 +337,12 @@ function ProcessingStep({ state, title, detail, last }: { state: StepState; titl
 // the captions, then the verdict when the fact-check finishes.
 function ProcessingDialog({
   item,
+  theme,
   onClose,
   onViewLibrary,
 }: {
   item?: VideoItem
+  theme: Theme
   onClose: () => void
   onViewLibrary: () => void
 }) {
@@ -363,16 +375,21 @@ function ProcessingDialog({
             ) : (
               <>
                 <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,rgba(255,255,255,0.35),transparent_42%),linear-gradient(115deg,transparent_28%,rgba(255,255,255,0.18)_48%,transparent_66%)] opacity-80 blur-sm" />
-                <div className="absolute -inset-10 animate-pulse bg-[conic-gradient(from_180deg_at_50%_45%,transparent,rgba(67,139,255,0.16),transparent,rgba(244,63,94,0.14),transparent)] blur-2xl" />
+                <div
+                  className="absolute -inset-10 animate-pulse blur-2xl"
+                  style={{
+                    background: `conic-gradient(from 180deg at 50% 45%, transparent, ${withAlpha(theme.logo[0], 0.16)}, transparent, ${withAlpha(theme.logo[1], 0.14)}, transparent)`,
+                  }}
+                />
               </>
             )}
             {!finished && (
               <div className="relative flex flex-col items-center gap-2">
                 <div className="relative">
-                  <Sparkles className="h-16 w-16 -rotate-12 text-blue-300 drop-shadow-[0_0_12px_rgba(96,165,250,0.9)]" />
-                  <span className="absolute -right-2 -top-2 text-sm text-pink-300">✦</span>
+                  <Sparkles className={cn("h-16 w-16 -rotate-12", theme.icon)} style={{ filter: `drop-shadow(0 0 12px ${withAlpha(theme.logo[0], 0.9)})` }} />
+                  <span className="absolute -right-2 -top-2 text-sm" style={{ color: theme.logo[1] }}>✦</span>
                 </div>
-                <span className="bg-gradient-to-r from-blue-300 to-pink-400 bg-clip-text text-3xl font-semibold text-transparent">AI</span>
+                <span className={cn("bg-gradient-to-r bg-clip-text text-3xl font-semibold text-transparent", theme.gradientDark)}>AI</span>
               </div>
             )}
           </div>
@@ -385,16 +402,19 @@ function ProcessingDialog({
 
             <div className="space-y-6">
               <ProcessingStep
+                theme={theme}
                 state={fetched ? "done" : "active"}
                 title="Fetching video & captions"
                 detail={fetched ? "Completed" : "Active"}
               />
               <ProcessingStep
+                theme={theme}
                 state={finished ? "done" : fetched ? "active" : "pending"}
                 title="AI fact-checking with Google Search"
                 detail={finished ? "Completed" : fetched ? "Usually 10–40 seconds" : "Pending"}
               />
               <ProcessingStep
+                theme={theme}
                 state={finished ? "done" : "pending"}
                 title="Saving to Chest"
                 detail={finished ? "Completed" : "Pending"}
@@ -419,7 +439,7 @@ function ProcessingDialog({
 
             {finished ? (
               <div className="mt-6 flex gap-2">
-                <Button onClick={onViewLibrary} className="flex-1 rounded-full bg-gradient-to-r from-blue-600 to-red-500 text-white">
+                <Button onClick={onViewLibrary} className={cn("flex-1 rounded-full bg-gradient-to-r", theme.buttonGradient, theme.buttonText)}>
                   View in Library
                 </Button>
                 <Button
@@ -481,8 +501,10 @@ function ProgressTab({
   insights,
   onRetryInsights,
   onAddVideo,
+  theme,
 }: {
   stats: ProgressStats
+  theme: Theme
   isDark: boolean
   displayName: string
   initials: string
@@ -498,10 +520,10 @@ function ProgressTab({
     return (
       <Card className={cn(card, "mx-auto max-w-xl text-center")}>
         <CardContent className="space-y-4 p-10">
-          <TrendingUp className="mx-auto h-8 w-8 text-blue-400" />
+          <TrendingUp className={cn("mx-auto h-8 w-8", theme.icon)} />
           <h2 className={cn("text-xl font-semibold", isDark ? "text-white" : "text-neutral-900")}>Your progress starts here</h2>
           <p className={muted}>Check your first video to see what you&apos;re learning and how much misinformation you&apos;ve caught.</p>
-          <Button onClick={onAddVideo} className="rounded-full bg-gradient-to-r from-blue-600 to-red-500 text-white">
+          <Button onClick={onAddVideo} className={cn("rounded-full bg-gradient-to-r", theme.buttonGradient, theme.buttonText)}>
             <Plus className="mr-2 h-4 w-4" />
             Add a video
           </Button>
@@ -512,24 +534,18 @@ function ProgressTab({
 
   const topTopic = stats.topics[0]?.name
   const maxTopic = stats.topics[0]?.total || 1
-  const heatColor = (count: number) =>
-    count === 0
-      ? isDark
-        ? "bg-white/[0.06]"
-        : "bg-neutral-100"
-      : count === 1
-        ? "bg-[#00b8db]/40"
-        : count === 2
-          ? "bg-[#00b8db]/70"
-          : "bg-[#00b8db]"
+  const emptyCell = isDark ? "rgba(255,255,255,0.06)" : "#f5f5f5"
+  const heatStyle = (count: number) => ({
+    background: count === 0 ? emptyCell : withAlpha(theme.logo[0], count === 1 ? 0.4 : count === 2 ? 0.7 : 1),
+  })
 
   return (
     <div className="space-y-8">
       <section className="w-full grid grid-cols-1 gap-6 lg:grid-cols-4" aria-label="Profile and quick stats">
         <Card className={cn("w-full h-full overflow-hidden", card)}>
           <CardContent className="relative flex h-full items-center gap-4 p-6">
-            <div className="absolute -right-10 -top-16 h-40 w-40 rounded-full bg-blue-500/10 blur-3xl" />
-            <div className="relative rounded-full bg-gradient-to-br from-blue-500 via-indigo-400 to-red-500 p-[2px] shadow-[0_0_25px_rgba(59,130,246,0.28)]">
+            <div className="absolute -right-10 -top-16 h-40 w-40 rounded-full blur-3xl" style={{ background: withAlpha(theme.logo[0], 0.12) }} />
+            <div className={cn("relative rounded-full bg-gradient-to-br p-[2px]", theme.buttonGradient)} style={{ boxShadow: `0 0 25px ${withAlpha(theme.logo[0], 0.3)}` }}>
               <div
                 className={cn(
                   "flex h-16 w-16 items-center justify-center rounded-full text-xl font-semibold",
@@ -551,9 +567,9 @@ function ProgressTab({
         </Card>
         <div className="col-span-1 grid h-full w-full items-stretch gap-6 sm:grid-cols-3 lg:col-span-3">
           {[
-            { label: "Videos checked", value: stats.checked, detail: `+${stats.thisMonth} this month`, icon: TrendingUp, color: "text-blue-400" },
+            { label: "Videos checked", value: stats.checked, detail: `+${stats.thisMonth} this month`, icon: TrendingUp, color: theme.icon },
             { label: "Misleading claims caught", value: stats.caught, detail: `${stats.falseCount} false, ${stats.caught - stats.falseCount} half-true`, icon: ShieldCheck, color: "text-red-400" },
-            { label: "Topics explored", value: stats.topicsExplored, detail: topTopic ? `Most: ${topTopic}` : "", icon: Compass, color: "text-violet-400" },
+            { label: "Topics explored", value: stats.topicsExplored, detail: topTopic ? `Most: ${topTopic}` : "", icon: Compass, color: theme.icon },
           ].map((metric) => (
             <Card key={metric.label} className={cn("h-full border backdrop-blur-md", isDark ? "border-white/10 bg-white/5" : "border-neutral-200 bg-white")}>
               <CardContent className="flex h-full flex-col p-5">
@@ -571,16 +587,57 @@ function ProgressTab({
         <Card className={card}>
           <CardHeader className="pb-3">
             <CardTitle className={title}>Fact-Checking Activity</CardTitle>
-            <CardDescription className={muted}>Last 12 weeks</CardDescription>
+            <CardDescription className={muted}>
+              {stats.activityTotal} video{stats.activityTotal === 1 ? "" : "s"} checked in the last 12 weeks
+            </CardDescription>
           </CardHeader>
           <CardContent>
-            <div className={cn("overflow-x-auto rounded-lg p-3", isDark ? "bg-black/10" : "bg-neutral-50")}>
-              <div className="grid w-max grid-flow-col grid-rows-7 gap-1">
-                {stats.activity.map((day) => (
+            {/* Calendar heatmap: one column per week (Sunday on top), month names
+                where a month starts, and Mon/Wed/Fri down the side. */}
+            <div className={cn("rounded-lg p-3", isDark ? "bg-black/10" : "bg-neutral-50")}>
+              <div
+                className="grid gap-[3px] sm:gap-1"
+                style={{ gridTemplateColumns: `auto repeat(${HEATMAP_WEEKS}, minmax(0, 1fr))` }}
+              >
+                {Array.from({ length: HEATMAP_WEEKS }, (_, week) => {
+                  const month = stats.activity[week * 7].date.slice(0, 7)
+                  const prev = week > 0 ? stats.activity[(week - 1) * 7].date.slice(0, 7) : ""
+                  // Skip a partial first month if the next label is too close to fit.
+                  const nextStart = stats.activity.findIndex((d, i) => i > week * 7 && i % 7 === 0 && d.date.slice(0, 7) !== month)
+                  const show = month !== prev && !(week === 0 && nextStart !== -1 && nextStart / 7 < 3)
+                  return show ? (
+                    <span
+                      key={`m${week}`}
+                      className={cn("whitespace-nowrap text-[10px] sm:text-xs", isDark ? "text-white/45" : "text-neutral-500")}
+                      style={{ gridColumn: week + 2, gridRow: 1 }}
+                    >
+                      {new Date(`${month}-01T00:00:00`).toLocaleString("en", { month: "short" })}
+                    </span>
+                  ) : null
+                })}
+                {[
+                  ["Mon", 1],
+                  ["Wed", 3],
+                  ["Fri", 5],
+                ].map(([label, weekday]) => (
+                  <span
+                    key={label}
+                    className={cn("pr-1 text-[10px] leading-none sm:text-xs self-center", isDark ? "text-white/45" : "text-neutral-500")}
+                    style={{ gridColumn: 1, gridRow: (weekday as number) + 2 }}
+                  >
+                    {label}
+                  </span>
+                ))}
+                {stats.activity.map((day, i) => (
                   <div
                     key={day.date}
-                    title={`${day.date}: ${day.count} video${day.count === 1 ? "" : "s"}`}
-                    className={cn("h-4 w-4 rounded-sm sm:h-5 sm:w-5", heatColor(day.count))}
+                    title={
+                      day.future
+                        ? undefined
+                        : `${new Date(`${day.date}T00:00:00`).toLocaleDateString("en", { weekday: "short", day: "numeric", month: "short" })}: ${day.count} video${day.count === 1 ? "" : "s"}`
+                    }
+                    className={cn("aspect-square w-full rounded-[3px]", day.future && "invisible")}
+                    style={{ gridColumn: Math.floor(i / 7) + 2, gridRow: (i % 7) + 2, ...(day.future ? {} : heatStyle(day.count)) }}
                   />
                 ))}
               </div>
@@ -588,7 +645,7 @@ function ProgressTab({
             <div className={cn("mt-3 flex flex-wrap items-center gap-2 text-xs", isDark ? "text-white/55" : "text-neutral-500")}>
               <span>Less</span>
               {[0, 1, 2, 3].map((n) => (
-                <span key={n} className={cn("h-3 w-3 rounded-sm", heatColor(n))} />
+                <span key={n} className="h-3 w-3 rounded-sm" style={heatStyle(n)} />
               ))}
               <span>More</span>
             </div>
@@ -643,7 +700,7 @@ function ProgressTab({
                 <CardTitle className={title}>Explore Next</CardTitle>
                 <CardDescription className={muted}>Suggestions based on what you&apos;ve checked, refreshed daily</CardDescription>
               </div>
-              <Sparkles className="h-5 w-5 text-blue-300" />
+              <Sparkles className={cn("h-5 w-5", theme.icon)} />
             </div>
           </CardHeader>
           <CardContent>
@@ -728,7 +785,7 @@ function ProgressTab({
                   className={cn(
                     "rounded-full p-[2px]",
                     badge.unlocked
-                      ? "bg-gradient-to-br from-blue-400 via-fuchsia-400 to-red-500 shadow-[0_0_15px_rgba(236,72,153,0.5)]"
+                      ? cn("bg-gradient-to-br", theme.buttonGradient)
                       : isDark
                         ? "bg-white/15"
                         : "bg-neutral-200",
@@ -738,7 +795,7 @@ function ProgressTab({
                     className={cn(
                       "flex h-20 w-20 items-center justify-center rounded-full",
                       isDark ? "bg-[#17171b]" : "bg-white",
-                      badge.unlocked ? "text-blue-300" : isDark ? "text-white/25" : "text-neutral-300",
+                      badge.unlocked ? theme.icon : isDark ? "text-white/25" : "text-neutral-300",
                     )}
                   >
                     <Icon className="h-8 w-8" />
@@ -760,7 +817,10 @@ function ProgressTab({
 const themes = {
   gold: {
     name: "Chestify Gold",
+    buttonText: "text-black",
     gradient: "from-yellow-400 to-white",
+    // Wordmark colors as hex for the SVG logo gradient.
+    logo: ["#facc15", "#fef9c3"] as [string, string],
     gradientDark: "from-yellow-400 via-yellow-200 to-white",
     buttonGradient: "from-yellow-400 to-yellow-200",
     activeTab: "bg-yellow-500/20 text-yellow-400 border-yellow-500/50",
@@ -771,7 +831,9 @@ const themes = {
   },
   blue: {
     name: "Cyber Blue",
+    buttonText: "text-white",
     gradient: "from-cyan-400 to-blue-600",
+    logo: ["#22d3ee", "#2563eb"] as [string, string],
     gradientDark: "from-cyan-400 via-blue-400 to-blue-600",
     buttonGradient: "from-cyan-400 to-blue-500",
     activeTab: "bg-cyan-500/20 text-cyan-400 border-cyan-500/50",
@@ -782,7 +844,9 @@ const themes = {
   },
   purple: {
     name: "Neon Purple",
+    buttonText: "text-white",
     gradient: "from-fuchsia-500 to-pink-600",
+    logo: ["#d946ef", "#db2777"] as [string, string],
     gradientDark: "from-fuchsia-500 via-pink-400 to-pink-600",
     buttonGradient: "from-fuchsia-500 to-pink-500",
     activeTab: "bg-fuchsia-500/20 text-fuchsia-400 border-fuchsia-500/50",
@@ -793,7 +857,9 @@ const themes = {
   },
   green: {
     name: "Hacker Green",
+    buttonText: "text-white",
     gradient: "from-emerald-400 to-lime-500",
+    logo: ["#34d399", "#84cc16"] as [string, string],
     gradientDark: "from-emerald-400 via-lime-400 to-lime-500",
     buttonGradient: "from-emerald-400 to-lime-400",
     activeTab: "bg-emerald-500/20 text-emerald-400 border-emerald-500/50",
@@ -804,7 +870,9 @@ const themes = {
   },
   inferno: {
     name: "Inferno",
+    buttonText: "text-white",
     gradient: "from-red-600 to-orange-500",
+    logo: ["#dc2626", "#f97316"] as [string, string],
     gradientDark: "from-red-600 to-orange-500",
     buttonGradient: "from-red-600 to-orange-500",
     activeTab: "bg-gradient-to-br from-red-600/20 to-orange-500/20 border-red-500/50 text-orange-100",
@@ -815,7 +883,9 @@ const themes = {
   },
   aurora: {
     name: "Aurora",
+    buttonText: "text-white",
     gradient: "from-indigo-500 to-cyan-400",
+    logo: ["#6366f1", "#22d3ee"] as [string, string],
     gradientDark: "from-indigo-500 via-purple-500 to-cyan-400",
     buttonGradient: "from-indigo-600 to-cyan-500",
     activeTab: "bg-gradient-to-br from-indigo-600/20 to-cyan-500/20 border-indigo-500/50 text-cyan-50",
@@ -826,7 +896,9 @@ const themes = {
   },
   "fire-ice": {
     name: "Fire & Ice",
+    buttonText: "text-white",
     gradient: "from-blue-600 to-red-500",
+    logo: ["#2563eb", "#ef4444"] as [string, string],
     gradientDark: "from-blue-600 to-red-500",
     buttonGradient: "from-blue-600 to-red-500",
     activeTab: "bg-gradient-to-br from-blue-600/20 to-red-500/20 border-blue-500/50 text-blue-100",
@@ -845,6 +917,7 @@ export default function ChestifyApp() {
   const [filter, setFilter] = useState<FilterType>("all")
   const [urlInput, setUrlInput] = useState("")
   const [isAdding, setIsAdding] = useState(false)
+  const [urlError, setUrlError] = useState<string | null>(null)
   const [insights, setInsights] = useState<InsightsState>({ status: "idle" })
   // Item shown in the processing popup on the Add tab; null when closed.
   const [trackingId, setTrackingId] = useState<string | null>(null)
@@ -854,15 +927,18 @@ export default function ChestifyApp() {
   const [activeChatId, setActiveChatId] = useState<string | null>(null)
   const [isReplying, setIsReplying] = useState(false)
   const [chatError, setChatError] = useState<string | null>(null)
-  const [showHistory, setShowHistory] = useState(false)
+  // History panel: open by default on desktop, a slide-over on phones.
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [renamingId, setRenamingId] = useState<string | null>(null)
+  const [renameValue, setRenameValue] = useState("")
   const messagesEndRef = useRef<HTMLDivElement>(null)
-  // Touch screens can't hover, so a tap reveals a card's details instead of
-  // opening the video; the "Watch on ..." link inside opens it.
+  const navRef = useRef<HTMLElement>(null)
+  // Touch screens can't hover, so a tap reveals a card's details. On every
+  // device only the "Watch on ..." link inside opens the video.
   const [canHover, setCanHover] = useState(true)
   const [revealedId, setRevealedId] = useState<string | null>(null)
   const [isDark, setIsDark] = useState(true)
   const [activeTheme, setActiveTheme] = useState<keyof typeof themes>("fire-ice")
-  const [recentActivity, setRecentActivity] = useState<RecentActivity[]>([])
   const [firestoreItems, setFirestoreItems] = useState<VideoItem[]>([])
   const [user, setUser] = useState<User | null>(null)
   const [authLoading, setAuthLoading] = useState(true)
@@ -887,6 +963,23 @@ export default function ChestifyApp() {
         console.error("Error loading theme:", error)
       }
     }
+  }, [])
+
+  // Publishes the sticky nav's height as --nav-h so the chat panel and its
+  // toggle sit right under it at any screen width (the nav wraps on phones).
+  useEffect(() => {
+    const nav = navRef.current
+    if (!nav) return
+    const update = () => document.documentElement.style.setProperty("--nav-h", `${nav.offsetHeight}px`)
+    update()
+    const observer = new ResizeObserver(update)
+    observer.observe(nav)
+    return () => observer.disconnect()
+  }, [user, view])
+
+  // The history panel starts open on desktop-width screens.
+  useEffect(() => {
+    setHistoryOpen(window.matchMedia("(min-width: 768px)").matches)
   }, [])
 
   // Tracks whether the primary pointer can hover (mouse) or not (touch).
@@ -1012,13 +1105,6 @@ export default function ChestifyApp() {
         items.push({ id: doc.id, ...doc.data() } as VideoItem)
       })
       setFirestoreItems(items)
-      
-      const recent: RecentActivity[] = items.slice(0, 3).map((item) => ({
-        url: item.url,
-        state: getDisplayState(item),
-        timestamp: item.created_at ? formatShortDate(item.created_at) : 'Just now'
-      }))
-      setRecentActivity(recent)
     })
 
     return () => unsubscribe()
@@ -1066,11 +1152,20 @@ export default function ChestifyApp() {
   // Validates the URL input, delegates the authenticated Firestore write to
   // addVideoToFirestore, and opens the processing popup for the new item.
   const handleAddVideo = async () => {
-    if (!urlInput.trim()) return
+    const link = urlInput.trim()
+    if (!link) return
+    // Catch typos and pasted text before they become a failed card.
+    try {
+      const parsed = new URL(link)
+      if (!/^https?:$/.test(parsed.protocol)) throw new Error("not http")
+    } catch {
+      setUrlError("That doesn't look like a video link. Paste the full URL, starting with https://")
+      return
+    }
     setIsAdding(true)
 
     try {
-      const itemId = await addVideoToFirestore(urlInput)
+      const itemId = await addVideoToFirestore(link)
       setUrlInput("")
       setTrackingId(itemId)
     } catch (error) {
@@ -1078,6 +1173,19 @@ export default function ChestifyApp() {
       alert("Failed to add video. Please try again.")
     } finally {
       setIsAdding(false)
+    }
+  }
+
+  // Fills the link box from the clipboard (the browser may ask for permission).
+  const handlePasteLink = async () => {
+    try {
+      const text = await navigator.clipboard.readText()
+      if (text) {
+        setUrlInput(text.trim())
+        setUrlError(null)
+      }
+    } catch (error) {
+      console.error("Clipboard read failed:", error)
     }
   }
 
@@ -1150,17 +1258,67 @@ export default function ChestifyApp() {
     }
   }
 
+  // On phones the history panel covers the chat, so close it after a choice.
+  const closeHistoryOnPhone = () => {
+    if (window.matchMedia("(max-width: 767px)").matches) setHistoryOpen(false)
+  }
+
   // Opens an empty chat; it is saved once the first message is sent.
   const handleNewChat = () => {
     setActiveChatId(null)
     setChatError(null)
-    setShowHistory(false)
+    closeHistoryOnPhone()
   }
 
   const handleSelectChat = (chatId: string) => {
     setActiveChatId(chatId)
     setChatError(null)
-    setShowHistory(false)
+    closeHistoryOnPhone()
+  }
+
+  const handleTogglePin = async (chat: ChatSummary) => {
+    if (!user) return
+    try {
+      await updateDoc(doc(db, "users", user.uid, "chats", chat.id), { pinned: !chat.pinned })
+    } catch (error) {
+      console.error("Pin failed:", error)
+    }
+  }
+
+  const startRename = (chat: ChatSummary) => {
+    setRenamingId(chat.id)
+    setRenameValue(chat.title)
+  }
+
+  const saveRename = async () => {
+    const chatId = renamingId
+    const title = renameValue.trim()
+    setRenamingId(null)
+    if (!user || !chatId || !title) return
+    try {
+      await updateDoc(doc(db, "users", user.uid, "chats", chatId), { title: title.slice(0, 80) })
+    } catch (error) {
+      console.error("Rename failed:", error)
+    }
+  }
+
+  // Deletes a chat and all of its messages (Firestore doesn't remove
+  // subcollections automatically).
+  const handleDeleteChat = async (chat: ChatSummary) => {
+    if (!user) return
+    if (!window.confirm(`Delete "${chat.title}"? This can't be undone.`)) return
+    try {
+      const chatRef = doc(db, "users", user.uid, "chats", chat.id)
+      const messageDocs = await getDocs(collection(chatRef, "messages"))
+      const batch = writeBatch(db)
+      messageDocs.forEach((m) => batch.delete(m.ref))
+      batch.delete(chatRef)
+      await batch.commit()
+      if (activeChatId === chat.id) setActiveChatId(null)
+    } catch (error) {
+      console.error("Delete chat failed:", error)
+      alert("Couldn't delete this chat. Please try again.")
+    }
   }
 
   // Sends the item back to 'processing' so the backend checks it again. The
@@ -1181,6 +1339,24 @@ export default function ChestifyApp() {
     } catch (error) {
       console.error("Recheck failed:", error)
       alert("Couldn't start the recheck. Please try again.")
+    }
+  }
+
+  // Removes a finished video from the user's chest after confirming. Shared
+  // cached analyses and saved chats are kept. Processing items can't be
+  // deleted, since the backend still writes the verdict to them.
+  const handleDelete = async (e: React.MouseEvent, item: VideoItem) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (!user || item.status === "processing") return
+    if (!window.confirm(`Delete "${item.title}" from your chest? This can't be undone.`)) return
+
+    try {
+      await deleteDoc(doc(db, "users", user.uid, "items", item.id))
+      setRevealedId((current) => (current === item.id ? null : current))
+    } catch (error) {
+      console.error("Delete failed:", error)
+      alert("Couldn't delete this video. Please try again.")
     }
   }
 
@@ -1213,7 +1389,7 @@ export default function ChestifyApp() {
       .join("\n")
 
     setChatError(null)
-    setShowHistory(false)
+    closeHistoryOnPhone()
     setActiveTab("chat")
 
     try {
@@ -1243,15 +1419,10 @@ export default function ChestifyApp() {
     }
   }
 
-  // Copies a predefined starter question into the controlled chat input.
-  const handleStarterQuestion = (question: string) => {
-    setChatInput(question)
-  }
 
   const activeChat = chats.find((c) => c.id === activeChatId)
-  const chatSecondaryButton = isDark
-    ? "bg-white/5 border-white/20 text-white/70 hover:bg-white/10 hover:text-white"
-    : "bg-neutral-50 border-neutral-300 text-neutral-600 hover:bg-neutral-100"
+  // Pinned chats first; each group keeps the most-recent-first order.
+  const sortedChats = [...chats.filter((c) => c.pinned), ...chats.filter((c) => !c.pinned)]
 
   const progressStats = useMemo(
     () =>
@@ -1295,11 +1466,8 @@ export default function ChestifyApp() {
           )}
         />
         <div
-          className={cn(
-            "absolute top-0 left-0 w-[800px] h-[800px] bg-gradient-radial blur-3xl",
-            isDark ? "from-yellow-500/30" : "from-yellow-400/20",
-            "to-transparent",
-          )}
+          className="absolute top-0 left-0 w-[800px] h-[800px] blur-3xl"
+          style={{ background: `radial-gradient(circle, ${withAlpha(currentTheme.logo[0], isDark ? 0.3 : 0.2)}, transparent 70%)` }}
         />
 
         <header className="absolute top-0 right-0 p-6 z-20">
@@ -1315,6 +1483,17 @@ export default function ChestifyApp() {
 
         <div className="relative z-10 flex flex-col items-center justify-center min-h-screen px-6">
           <div className="max-w-4xl mx-auto text-center space-y-8">
+            <div className="flex items-center justify-center gap-3">
+              <ChestifyLogo className="h-12 md:h-14" gradient={currentTheme.logo} />
+              <span
+                className={cn(
+                  "text-3xl md:text-4xl font-bold bg-gradient-to-r bg-clip-text text-transparent",
+                  currentTheme.gradient,
+                )}
+              >
+                Chestify
+              </span>
+            </div>
             <h1
               className={cn(
                 "text-5xl md:text-7xl font-semibold leading-tight bg-gradient-to-r bg-clip-text text-transparent",
@@ -1383,126 +1562,93 @@ export default function ChestifyApp() {
         )}
       />
       <div
-        className={cn(
-          "absolute top-0 left-0 w-[600px] h-[600px] bg-gradient-radial blur-3xl",
-          isDark ? "from-yellow-500/10" : "from-yellow-400/5",
-          "to-transparent",
-        )}
+        className="absolute top-0 left-0 w-[600px] h-[600px] blur-3xl"
+        style={{ background: `radial-gradient(circle, ${withAlpha(currentTheme.logo[0], isDark ? 0.1 : 0.05)}, transparent 70%)` }}
       />
       <div className="relative z-10 flex flex-col min-h-screen">
-        <header className={cn("border-b backdrop-blur-sm", isDark ? "border-white/10" : "border-neutral-200")}>
-          <div className="container mx-auto px-6 py-6">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Package className={`w-7 h-7 ${currentTheme.icon}`} />
-                <h1
+        {/* One sticky bar: brand, section tabs, account. On phones the tabs wrap
+            onto their own row. Its height is measured into --nav-h (see navRef). */}
+        <header
+          ref={navRef}
+          className={cn(
+            "sticky top-0 z-20 border-b backdrop-blur-md",
+            isDark ? "border-white/10 bg-black/40" : "border-neutral-200 bg-white/70",
+          )}
+        >
+          <div className="container mx-auto flex flex-wrap items-center gap-x-4 gap-y-3 px-6 py-3">
+            {/* Brand doubles as "home": back to the Library, scrolled to the top. */}
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTab("library")
+                window.scrollTo({ top: 0, behavior: "smooth" })
+              }}
+              aria-label="Chestify home"
+              className="flex items-center gap-2 rounded-lg transition-opacity hover:opacity-80"
+            >
+              <ChestifyLogo className="h-7" gradient={currentTheme.logo} title="" />
+              <h1 className={cn("text-2xl font-bold bg-gradient-to-r bg-clip-text text-transparent", currentTheme.gradient)}>
+                Chestify
+              </h1>
+            </button>
+            <nav aria-label="Sections" className="order-last flex w-full justify-center gap-1 overflow-x-auto md:order-none md:w-auto md:flex-1">
+              {(
+                [
+                  { id: "add", label: "Add Video", icon: <Plus className="w-4 h-4" /> },
+                  { id: "library", label: "Library", icon: <ChestifyLogo className="h-4" title="" /> },
+                  { id: "chat", label: "Chat", icon: <MessageSquare className="w-4 h-4" /> },
+                  { id: "progress", label: "Progress", icon: <TrendingUp className="w-4 h-4" /> },
+                ] as { id: TabType; label: string; icon: React.ReactNode }[]
+              ).map((tab) => (
+                <Button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id)}
+                  variant={activeTab === tab.id ? "default" : "ghost"}
+                  aria-current={activeTab === tab.id ? "page" : undefined}
                   className={cn(
-                    "text-3xl font-bold bg-gradient-to-r bg-clip-text text-transparent",
-                    isDark ? currentTheme.gradient : currentTheme.gradient,
+                    "flex-shrink-0 gap-2 rounded-full px-3 sm:px-5",
+                    activeTab === tab.id
+                      ? isDark
+                        ? currentTheme.activeTab
+                        : currentTheme.activeTabLight
+                      : isDark
+                        ? "text-white/60 hover:text-white hover:bg-white/5"
+                        : "text-neutral-600 hover:text-neutral-900 hover:bg-neutral-100",
                   )}
                 >
-                  Chestify
-                </h1>
-              </div>
-              <div className="flex items-center gap-4">
-                {userData && (
-                  <UserProfileDropdown
-                    isDark={isDark}
-                    onSignOut={handleSignOut}
-                    user={userData}
-                    currentTheme={currentTheme}
-                  />
-                )}
-                <ThemeControls
+                  {tab.icon}
+                  {tab.label}
+                </Button>
+              ))}
+            </nav>
+            <div className="ml-auto flex items-center gap-3 md:ml-0">
+              {userData && (
+                <UserProfileDropdown
                   isDark={isDark}
-                  activeTheme={activeTheme}
+                  onSignOut={handleSignOut}
+                  user={userData}
                   currentTheme={currentTheme}
-                  themes={themes}
-                  onThemeChange={(theme) => setActiveTheme(theme as keyof typeof themes)}
-                  onToggleDark={() => setIsDark(!isDark)}
                 />
-              </div>
+              )}
+              <ThemeControls
+                isDark={isDark}
+                activeTheme={activeTheme}
+                currentTheme={currentTheme}
+                themes={themes}
+                onThemeChange={(theme) => setActiveTheme(theme as keyof typeof themes)}
+                onToggleDark={() => setIsDark(!isDark)}
+              />
             </div>
           </div>
         </header>
-        <nav
+        <main
           className={cn(
-            "border-b backdrop-blur-sm sticky top-0 z-20",
-            isDark ? "border-white/10" : "border-neutral-200",
+            "flex-1",
+            activeTab === "chat"
+              ? cn("w-full backdrop-blur-xl", isDark ? "bg-black/30" : "bg-white/60")
+              : "container mx-auto px-6 py-12",
           )}
         >
-          <div className="container mx-auto px-6 py-4">
-            <div className="flex flex-wrap justify-center gap-2">
-              <Button
-                onClick={() => setActiveTab("add")}
-                variant={activeTab === "add" ? "default" : "ghost"}
-                className={cn(
-                  "rounded-full px-4 sm:px-6",
-                  activeTab === "add"
-                    ? isDark
-                      ? currentTheme.activeTab
-                      : currentTheme.activeTabLight
-                    : isDark
-                      ? "text-white/60 hover:text-white hover:bg-white/5"
-                      : "text-neutral-600 hover:text-neutral-900 hover:bg-neutral-100",
-                )}
-              >
-                <Plus className="w-4 h-4 mr-2" />
-                Add Video
-              </Button>
-              <Button
-                onClick={() => setActiveTab("library")}
-                variant={activeTab === "library" ? "default" : "ghost"}
-                className={cn(
-                  "rounded-full px-4 sm:px-6",
-                  activeTab === "library"
-                    ? isDark
-                      ? currentTheme.activeTab
-                      : currentTheme.activeTabLight
-                    : isDark
-                      ? "text-white/60 hover:text-white hover:bg-white/5"
-                      : "text-neutral-600 hover:text-neutral-900 hover:bg-neutral-100",
-                )}
-              >
-                Library
-              </Button>
-              <Button
-                onClick={() => setActiveTab("chat")}
-                variant={activeTab === "chat" ? "default" : "ghost"}
-                className={cn(
-                  "rounded-full px-4 sm:px-6",
-                  activeTab === "chat"
-                    ? isDark
-                      ? currentTheme.activeTab
-                      : currentTheme.activeTabLight
-                    : isDark
-                      ? "text-white/60 hover:text-white hover:bg-white/5"
-                      : "text-neutral-600 hover:text-neutral-900 hover:bg-neutral-100",
-                )}
-              >
-                Chat
-              </Button>
-              <Button
-                onClick={() => setActiveTab("progress")}
-                variant={activeTab === "progress" ? "default" : "ghost"}
-                className={cn(
-                  "rounded-full px-4 sm:px-6",
-                  activeTab === "progress"
-                    ? isDark
-                      ? currentTheme.activeTab
-                      : currentTheme.activeTabLight
-                    : isDark
-                      ? "text-white/60 hover:text-white hover:bg-white/5"
-                      : "text-neutral-600 hover:text-neutral-900 hover:bg-neutral-100",
-                )}
-              >
-                <TrendingUp className="w-4 h-4 mr-2" />
-                Progress
-              </Button>
-            </div>
-          </div>
-        </nav>
-        <main className="flex-1 container mx-auto px-6 py-12">
           {activeTab === "library" && (
             <div className="space-y-8">
               <div>
@@ -1557,15 +1703,16 @@ export default function ChestifyApp() {
                   return (
                   <div
                     key={item.id}
-                    onClick={() =>
-                      canHover
-                        ? window.open(item.url, "_blank")
-                        : setRevealedId((current) => (current === item.id ? null : item.id))
-                    }
-                    className="block cursor-pointer"
+                    // Only the "Watch on ..." link opens the video, so selecting text on
+                    // a card never opens it. On touch screens a tap reveals the details.
+                    onClick={() => {
+                      if (!canHover) setRevealedId((current) => (current === item.id ? null : item.id))
+                    }}
+                    className={cn("block", !canHover && "cursor-pointer")}
                   >
                     <DirectionAwareHover
-                      imageUrl={item.thumbnail || "/placeholder.svg"}
+                      imageUrl={item.thumbnail || ""}
+                      fallback={<ThumbnailPlaceholder url={item.url} gradient={currentTheme.logo} />}
                       overlay={<VerdictOverlay state={state} score={item.accuracy_score} />}
                       revealed={!canHover && revealedId === item.id}
                       className={cn(
@@ -1586,7 +1733,7 @@ export default function ChestifyApp() {
                         onClick={(e) => e.stopPropagation()}
                         className="inline-flex items-center gap-1 rounded-full border border-white/20 bg-black/70 px-2.5 py-1 text-xs font-medium text-white/90 backdrop-blur-sm hover:bg-black/90"
                       >
-                        Watch on {item.url.includes("youtu") ? "YouTube" : item.url.includes("instagram") ? "Instagram" : item.url.includes("x.com") || item.url.includes("twitter") ? "X" : item.url.includes("facebook") ? "Facebook" : "TikTok"}
+                        Watch on {platformName(item.url)}
                         <ExternalLink className="w-3 h-3" />
                       </a>
                       <div>
@@ -1675,6 +1822,15 @@ export default function ChestifyApp() {
                               <RotateCw className="w-3 h-3 mr-1" />
                               Check again
                             </Button>
+                            <Button
+                              size="sm"
+                              title="Delete this video"
+                              aria-label="Delete this video"
+                              onClick={(e) => handleDelete(e, item)}
+                              className="rounded-full border border-white/20 bg-white/10 px-2.5 text-white/80 hover:border-red-400/60 hover:bg-red-500/30 hover:text-red-200"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </Button>
                           </div>
                         </div>
                       ) : null}
@@ -1687,122 +1843,188 @@ export default function ChestifyApp() {
             </div>
           )}
           {activeTab === "add" && (
-            <div className="max-w-2xl mx-auto space-y-6">
-              <Card
-                className={cn(
-                  "backdrop-blur border",
-                  isDark ? "bg-black/40 border-white/10" : "bg-white border-neutral-200 shadow-sm",
-                )}
-              >
-                <CardHeader>
-                  <CardTitle
+            <div className="mx-auto max-w-3xl space-y-10 pb-4 pt-0 [@media(min-height:900px)]:space-y-16 [@media(min-height:900px)]:pt-10">
+              {/* Hero: the one action on this page, front and center. */}
+              <section className="space-y-5 text-center [@media(min-height:900px)]:space-y-6">
+                <ChestifyLogo className="mx-auto h-11 [@media(min-height:900px)]:h-14" gradient={currentTheme.logo} title="" />
+                <h2
+                  className={cn(
+                    "bg-gradient-to-r bg-clip-text text-4xl font-semibold leading-tight text-transparent text-balance md:text-5xl",
+                    isDark ? currentTheme.gradientDark : currentTheme.gradient,
+                  )}
+                >
+                  Check a video before you believe it
+                </h2>
+                <p className={cn("mx-auto max-w-xl text-base md:text-lg", isDark ? "text-white/60" : "text-neutral-600")}>
+                  Paste a short-form video link. Chestify reads what it says, checks it against trusted sources, and
+                  scores how true it is.
+                </p>
+
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault()
+                    handleAddVideo()
+                  }}
+                  className="mx-auto max-w-2xl"
+                >
+                  <div
                     className={cn(
-                      "text-2xl font-semibold bg-gradient-to-r bg-clip-text text-transparent",
-                      isDark ? currentTheme.gradient : currentTheme.gradient,
+                      "flex items-center gap-2 rounded-full border p-2 pl-5 backdrop-blur-xl transition-colors",
+                      urlError
+                        ? "border-red-500/60"
+                        : isDark
+                          ? "border-white/15 bg-white/[0.06] focus-within:border-white/30"
+                          : "border-neutral-300 bg-white shadow-sm focus-within:border-neutral-400",
                     )}
                   >
-                    Add Video to Your Chest
-                  </CardTitle>
-                  <CardDescription className={cn(isDark ? "text-white/60" : "text-neutral-600")}>
-                    Paste a video URL to extract and verify its content
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <Input
-                    placeholder="Paste video URL here..."
-                    value={urlInput}
-                    onChange={(e) => setUrlInput(e.target.value)}
-                    className={cn(
-                      isDark
-                        ? "bg-white/5 border-white/20 text-white placeholder:text-white/40"
-                        : "bg-white border-neutral-300 text-neutral-900 placeholder:text-neutral-400",
-                    )}
-                  />
-                  <Button
-                    onClick={handleAddVideo}
-                    disabled={isAdding || !urlInput.trim()}
-                    className={cn(
-                      "w-full rounded-full bg-gradient-to-r font-medium transition-all",
-                      `${currentTheme.buttonGradient}`,
-                      isDark ? "text-white" : "text-black",
-                      currentTheme.buttonShadow || "",
-                    )}
-                  >
-                    {isAdding ? (
-                      <>
-                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                        Adding to Chest...
-                      </>
-                    ) : (
-                      "Add to Chest"
-                    )}
-                  </Button>
-                </CardContent>
-              </Card>
-              <Card
-                className={cn(
-                  "backdrop-blur border",
-                  isDark ? "bg-black/40 border-white/10" : "bg-white border-neutral-200 shadow-sm",
-                )}
-              >
-                <CardHeader>
-                  <CardTitle className={cn("text-xl font-semibold", isDark ? "text-white" : "text-neutral-900")}>
-                    Recent Activity
-                  </CardTitle>
-                  <CardDescription className={cn(isDark ? "text-white/60" : "text-neutral-600")}>
-                    Your last 3 submitted URLs
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  {recentActivity.map((activity, idx) => (
-                    <div
-                      key={idx}
+                    <input
+                      type="url"
+                      inputMode="url"
+                      placeholder="https://www.tiktok.com/@creator/video/..."
+                      value={urlInput}
+                      onChange={(e) => {
+                        setUrlInput(e.target.value)
+                        setUrlError(null)
+                      }}
+                      aria-label="Video link"
                       className={cn(
-                        "flex items-center justify-between p-3 rounded-lg border",
-                        isDark ? "bg-white/5 border-white/10" : "bg-neutral-50 border-neutral-200",
+                        "h-11 min-w-0 flex-1 bg-transparent text-base outline-none",
+                        isDark ? "text-white placeholder:text-white/35" : "text-neutral-900 placeholder:text-neutral-400",
+                      )}
+                    />
+                    <button
+                      type="button"
+                      onClick={handlePasteLink}
+                      title="Paste from clipboard"
+                      aria-label="Paste from clipboard"
+                      className={cn(
+                        "hidden rounded-full p-2.5 transition-colors sm:block",
+                        isDark ? "text-white/60 hover:bg-white/10 hover:text-white" : "text-neutral-500 hover:bg-neutral-100",
                       )}
                     >
-                      <div className="flex items-center gap-3 flex-1 min-w-0">
-                        {activity.state === "true" && (
-                          <CheckCircle2 className={cn("w-4 h-4 flex-shrink-0", isDark ? "text-emerald-400" : "text-emerald-600")} />
-                        )}
-                        {activity.state === "half_truth" && (
-                          <AlertTriangle className={cn("w-4 h-4 flex-shrink-0", isDark ? "text-yellow-400" : "text-yellow-600")} />
-                        )}
-                        {activity.state === "false" && (
-                          <XCircle className={cn("w-4 h-4 flex-shrink-0", isDark ? "text-red-500" : "text-red-600")} />
-                        )}
-                        {activity.state === "unverified" && (
-                          <HelpCircle className="w-4 h-4 flex-shrink-0 text-zinc-400" />
-                        )}
-                        {activity.state === "processing" && (
-                          <Loader2
-                            className={cn(
-                              "w-4 h-4 flex-shrink-0 animate-spin",
-                              isDark ? "text-purple-400" : "text-purple-600",
-                            )}
-                          />
-                        )}
-                        <span className={cn("text-sm truncate", isDark ? "text-white/80" : "text-neutral-700")}>
-                          {activity.url}
+                      <ClipboardPaste className="h-5 w-5" />
+                    </button>
+                    <Button
+                      type="submit"
+                      disabled={isAdding || !urlInput.trim()}
+                      className={cn(
+                        "h-11 rounded-full bg-gradient-to-r px-5 font-medium sm:px-6",
+                        currentTheme.buttonGradient,
+                        isDark ? "text-white" : "text-black",
+                        currentTheme.buttonShadow || "",
+                      )}
+                    >
+                      {isAdding ? <Loader2 className="h-4 w-4 animate-spin" /> : "Add to Chest"}
+                    </Button>
+                  </div>
+                  {urlError && <p className="mt-2 text-sm text-red-400">{urlError}</p>}
+                </form>
+
+                <div className="flex flex-wrap items-center justify-center gap-2 text-xs">
+                  <span className={isDark ? "text-white/40" : "text-neutral-500"}>Works with</span>
+                  {["TikTok", "YouTube Shorts", "Instagram Reels", "X"].map((platform) => (
+                    <span
+                      key={platform}
+                      className={cn(
+                        "rounded-full border px-2.5 py-1",
+                        isDark ? "border-white/10 bg-white/5 text-white/70" : "border-neutral-200 bg-neutral-50 text-neutral-700",
+                      )}
+                    >
+                      {platform}
+                    </span>
+                  ))}
+                </div>
+              </section>
+
+              {/* How it works: static explanation, styled like the processing stepper. */}
+              <section aria-label="How it works">
+                <p className={cn("mb-4 text-center text-xs font-semibold uppercase tracking-[0.2em]", isDark ? "text-white/40" : "text-neutral-500")}>
+                  How it works
+                </p>
+                <div className="grid gap-4 md:grid-cols-3">
+                  {[
+                    { icon: ClipboardPaste, title: "Paste a link", text: "Any public TikTok, YouTube Short, Instagram Reel or X video." },
+                    { icon: Search, title: "We fact-check it", text: "Chestify reads the captions and checks the claims with Google Search." },
+                    { icon: ShieldCheck, title: "Get the verdict", text: "A 1–10 accuracy score, the key correction, and the sources behind it." },
+                  ].map((step, i) => (
+                    <div
+                      key={step.title}
+                      className={cn(
+                        "rounded-2xl border p-4 backdrop-blur-md",
+                        isDark ? "border-white/10 bg-white/[0.04]" : "border-neutral-200 bg-white",
+                      )}
+                    >
+                      <div className="flex items-center gap-3">
+                        <span className={cn("flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-gradient-to-br text-xs font-semibold", currentTheme.buttonGradient, currentTheme.buttonText)}>
+                          {i + 1}
                         </span>
+                        <p className={cn("flex-1 font-medium", isDark ? "text-white" : "text-neutral-900")}>{step.title}</p>
+                        <step.icon className={cn("h-5 w-5 flex-shrink-0", currentTheme.icon)} />
                       </div>
-                      <div className="flex items-center gap-2 ml-2">
-                        <Clock className={cn("w-3 h-3", isDark ? "text-white/40" : "text-neutral-400")} />
-                        <span
-                          className={cn("text-xs whitespace-nowrap", isDark ? "text-white/40" : "text-neutral-500")}
-                        >
-                          {activity.timestamp}
-                        </span>
-                      </div>
+                      <p className={cn("mt-2 text-sm", isDark ? "text-white/55" : "text-neutral-600")}>{step.text}</p>
                     </div>
                   ))}
-                </CardContent>
-              </Card>
+                </div>
+              </section>
+
+              {/* Recent checks: what came back, not raw URLs. */}
+              {firestoreItems.length > 0 && (
+                <section aria-label="Recent checks">
+                  <div className="mb-4 flex items-center justify-between">
+                    <p className={cn("text-xs font-semibold uppercase tracking-[0.2em]", isDark ? "text-white/40" : "text-neutral-500")}>
+                      Recent checks
+                    </p>
+                    <button
+                      onClick={() => setActiveTab("library")}
+                      className={cn("text-sm underline-offset-4 hover:underline", isDark ? "text-white/60 hover:text-white" : "text-neutral-600")}
+                    >
+                      View all
+                    </button>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    {firestoreItems.slice(0, 3).map((item) => {
+                      const state = getDisplayState(item)
+                      return (
+                        <button
+                          key={item.id}
+                          onClick={() => setActiveTab("library")}
+                          className={cn(
+                            "flex items-center gap-3 rounded-2xl border p-3 text-left transition-colors",
+                            isDark ? "border-white/10 bg-white/[0.04] hover:bg-white/[0.08]" : "border-neutral-200 bg-white hover:bg-neutral-50",
+                          )}
+                        >
+                          <SmallThumb url={item.url} thumbnail={item.thumbnail} gradient={currentTheme.logo} />
+                          <div className="min-w-0 flex-1">
+                            <p className={cn("line-clamp-2 text-sm font-medium", isDark ? "text-white/90" : "text-neutral-900")}>
+                              {item.title && item.title !== "Processing..." ? item.title : platformName(item.url) + " video"}
+                            </p>
+                            <div className="mt-2 flex items-center gap-2">
+                              {state === "processing" ? (
+                                <span className="flex items-center gap-1 text-xs text-purple-400">
+                                  <Loader2 className="h-3 w-3 animate-spin" />
+                                  Checking...
+                                </span>
+                              ) : (
+                                <ScorePill state={state} score={item.accuracy_score} className="px-2 py-0.5 text-[11px]" />
+                              )}
+                              {item.created_at && (
+                                <span className={cn("text-[11px]", isDark ? "text-white/40" : "text-neutral-500")}>
+                                  {formatShortDate(item.created_at)}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </section>
+              )}
 
               {trackingId && (
                 <ProcessingDialog
                   item={firestoreItems.find((i) => i.id === trackingId)}
+                  theme={currentTheme}
                   onClose={() => setTrackingId(null)}
                   onViewLibrary={() => {
                     setTrackingId(null)
@@ -1813,255 +2035,282 @@ export default function ChestifyApp() {
             </div>
           )}
           {activeTab === "chat" && (
-            <div className="max-w-5xl mx-auto">
-              <h2
-                className={cn(
-                  "text-4xl font-semibold bg-gradient-to-r bg-clip-text text-transparent mb-6",
-                  isDark ? currentTheme.gradient : currentTheme.gradient,
-                )}
-              >
-                Chat
-              </h2>
-              {/* Fixed-height panel: min-h-0 on each flex level lets the message
-                  list scroll inside it instead of pushing past the footer. */}
-              <div className="h-[70dvh] min-h-[420px] max-h-[760px] flex flex-col">
-                <Card
+            <div className="relative flex w-full">
+              {/* Phones: the history panel slides over the chat with a dimmed backdrop. */}
+              {historyOpen && (
+                <div className="fixed inset-0 z-30 bg-black/50 md:hidden" onClick={() => setHistoryOpen(false)} />
+              )}
+              {historyOpen && (
+                <aside
                   className={cn(
-                    "flex-1 min-h-0 backdrop-blur border flex flex-col",
-                    isDark ? "bg-black/40 border-white/10" : "bg-white border-neutral-200 shadow-sm",
+                    "fixed inset-y-0 left-0 z-40 flex w-72 flex-shrink-0 flex-col border-r",
+                    "md:sticky md:top-[var(--nav-h,61px)] md:z-auto md:h-[calc(100dvh-var(--nav-h,61px))]",
+                    isDark ? "border-white/10 bg-[#131316]" : "border-neutral-200 bg-neutral-50",
                   )}
                 >
-                  <CardHeader className={cn("border-b", isDark ? "border-white/10" : "border-neutral-200")}>
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <CardTitle className={cn("text-xl font-light", isDark ? "text-white" : "text-neutral-900")}>
-                          Q&A Compass
-                        </CardTitle>
-                        <CardDescription className={cn("truncate", isDark ? "text-white/60" : "text-neutral-600")}>
-                          {activeChat?.video_title
-                            ? `About: ${activeChat.video_title}`
-                            : "Ask questions about your saved videos"}
-                        </CardDescription>
-                      </div>
-                      <div className="flex gap-2 flex-shrink-0">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setShowHistory((v) => !v)}
-                          className={cn("md:hidden rounded-full text-xs", chatSecondaryButton)}
-                        >
-                          <History className="w-3 h-3 mr-1" />
-                          History
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={handleNewChat}
-                          className={cn("rounded-full text-xs", chatSecondaryButton)}
-                        >
-                          <Plus className="w-3 h-3 mr-1" />
-                          New chat
-                        </Button>
-                      </div>
-                    </div>
-                  </CardHeader>
-                  <CardContent className="flex-1 min-h-0 flex p-0">
-                    <aside
+                  <div className="flex items-center justify-between px-3 pb-2 pt-4">
+                    <span className={cn("px-2 text-sm font-semibold", isDark ? "text-white/80" : "text-neutral-800")}>Chats</span>
+                    <button
+                      onClick={() => setHistoryOpen(false)}
+                      aria-label="Close chat history"
+                      title="Close chat history"
+                      className={cn("rounded-full p-2 transition-colors", isDark ? "text-white/60 hover:bg-white/10 hover:text-white" : "text-neutral-500 hover:bg-neutral-200")}
+                    >
+                      <PanelLeftClose className="h-4 w-4" />
+                    </button>
+                  </div>
+                  <div className="px-3">
+                    <button
+                      onClick={handleNewChat}
                       className={cn(
-                        showHistory ? "flex" : "hidden",
-                        "md:flex w-full md:w-60 flex-shrink-0 flex-col gap-1 overflow-y-auto p-3 md:border-r",
-                        isDark ? "border-white/10" : "border-neutral-200",
+                        "flex w-full items-center gap-3 rounded-full px-4 py-2.5 text-sm font-medium transition-colors",
+                        isDark ? "text-white/85 hover:bg-white/10" : "text-neutral-800 hover:bg-neutral-200/70",
                       )}
                     >
-                      <p className={cn("px-2 pb-1 text-xs font-semibold uppercase tracking-wide", isDark ? "text-white/40" : "text-neutral-500")}>
-                        Recent chats
-                      </p>
-                      {chats.length === 0 && (
-                        <p className={cn("px-2 text-sm", isDark ? "text-white/40" : "text-neutral-400")}>
-                          No saved chats yet.
-                        </p>
-                      )}
-                      {chats.map((chat) => (
-                        <button
-                          key={chat.id}
-                          onClick={() => handleSelectChat(chat.id)}
-                          className={cn(
-                            "w-full rounded-lg px-3 py-2 text-left transition-colors",
-                            chat.id === activeChatId
-                              ? isDark
-                                ? currentTheme.activeTab
-                                : currentTheme.activeTabLight
-                              : isDark
-                                ? "text-white/70 hover:bg-white/5"
-                                : "text-neutral-700 hover:bg-neutral-100",
-                          )}
-                        >
-                          <span className="flex items-center gap-2 text-sm">
-                            {chat.video_id ? (
-                              <Package className="w-3 h-3 flex-shrink-0 opacity-70" />
-                            ) : (
-                              <MessageSquare className="w-3 h-3 flex-shrink-0 opacity-70" />
-                            )}
-                            <span className="truncate">{chat.title}</span>
-                          </span>
-                          {chat.updated_at && (
-                            <span className={cn("block pl-5 text-[11px]", isDark ? "text-white/40" : "text-neutral-500")}>
-                              {formatShortDate(chat.updated_at)}
-                            </span>
-                          )}
-                        </button>
-                      ))}
-                    </aside>
-                    <div className={cn(showHistory ? "hidden" : "flex", "md:flex flex-1 min-w-0 min-h-0 flex-col p-6")}>
-                    <div className="flex-1 min-h-0 overflow-y-auto space-y-4 mb-4 pr-1">
-                      {messages.length === 0 ? (
-                        <div className="h-full flex items-center justify-center">
-                          <p className={cn("text-center", isDark ? "text-white/40" : "text-neutral-400")}>
-                            Ask me anything about your saved videos...
-                          </p>
-                        </div>
-                      ) : (
-                        messages.map((msg) => (
-                          <div
-                            key={msg.id}
+                      <SquarePen className="h-4 w-4" />
+                      New chat
+                    </button>
+                  </div>
+                  <p className={cn("px-7 pb-1 pt-5 text-xs font-semibold uppercase tracking-wide", isDark ? "text-white/40" : "text-neutral-500")}>
+                    Recent
+                  </p>
+                  <div className="flex-1 space-y-0.5 overflow-y-auto px-3 pb-4">
+                    {sortedChats.length === 0 && (
+                      <p className={cn("px-4 text-sm", isDark ? "text-white/40" : "text-neutral-400")}>No saved chats yet.</p>
+                    )}
+                    {sortedChats.map((chat) => (
+                      <div key={chat.id} className="group relative flex items-center">
+                        {renamingId === chat.id ? (
+                          <input
+                            autoFocus
+                            value={renameValue}
+                            onChange={(e) => setRenameValue(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") saveRename()
+                              if (e.key === "Escape") setRenamingId(null)
+                            }}
+                            onBlur={saveRename}
+                            aria-label="Chat name"
                             className={cn(
-                              "p-4 rounded-lg max-w-[80%]",
-                              msg.role === "user"
+                              "w-full rounded-full border px-4 py-2 text-sm outline-none",
+                              isDark ? "border-white/20 bg-white/5 text-white" : "border-neutral-300 bg-white text-neutral-900",
+                            )}
+                          />
+                        ) : (
+                          <button
+                            onClick={() => handleSelectChat(chat.id)}
+                            title={chat.updated_at ? `${chat.title} · ${formatShortDate(chat.updated_at)}` : chat.title}
+                            className={cn(
+                              "flex w-full min-w-0 items-center gap-2 rounded-full py-2 pl-4 pr-10 text-left text-sm transition-colors",
+                              chat.id === activeChatId
                                 ? isDark
-                                  ? `ml-auto border text-white ${currentTheme.activeTab}`
-                                  : `ml-auto border text-neutral-900 ${currentTheme.activeTabLight}`
+                                  ? currentTheme.activeTab
+                                  : currentTheme.activeTabLight
                                 : isDark
-                                  ? "mr-auto bg-white/5 border border-white/10 text-white/90"
-                                  : "mr-auto bg-neutral-100 border border-neutral-200 text-neutral-900",
+                                  ? "text-white/70 hover:bg-white/5"
+                                  : "text-neutral-700 hover:bg-neutral-200/70",
                             )}
                           >
-                            <ReactMarkdown
-                              components={{
-                                h1: ({ children }) => <h1 className="text-xl font-semibold mb-2">{children}</h1>,
-                                h2: ({ children }) => <h2 className="text-lg font-semibold mb-2">{children}</h2>,
-                                h3: ({ children }) => <h3 className="text-base font-semibold mb-1">{children}</h3>,
-                                p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
-                                ul: ({ children }) => <ul className="list-disc pl-5 mb-2 space-y-1">{children}</ul>,
-                                ol: ({ children }) => <ol className="list-decimal pl-5 mb-2 space-y-1">{children}</ol>,
-                                a: ({ children, href }) => (
-                                  <a
-                                    href={href}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className={cn(
-                                      "underline",
-                                      isDark ? "text-cyan-300 hover:text-cyan-200" : "text-blue-600 hover:text-blue-500",
-                                    )}
-                                  >
-                                    {children}
-                                  </a>
-                                ),
-                                code: ({ children }) => (
-                                  <code
-                                    className={cn(
-                                      "rounded px-1 py-0.5 text-sm",
-                                      isDark ? "bg-white/10" : "bg-neutral-200",
-                                    )}
-                                  >
-                                    {children}
-                                  </code>
-                                ),
-                              }}
+                            {chat.video_id ? (
+                              <ChestifyLogo className="h-3 flex-shrink-0 opacity-70" title="" />
+                            ) : (
+                              <MessageSquare className="h-3 w-3 flex-shrink-0 opacity-70" />
+                            )}
+                            <span className="truncate">{chat.title}</span>
+                            {chat.pinned && <Pin className="h-3 w-3 flex-shrink-0 opacity-60" />}
+                          </button>
+                        )}
+                        {renamingId !== chat.id && (
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <button
+                                aria-label="Chat options"
+                                className={cn(
+                                  "absolute right-1.5 rounded-full p-1.5 transition-opacity",
+                                  "opacity-0 group-hover:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100 [@media(hover:none)]:opacity-100",
+                                  isDark ? "text-white/70 hover:bg-white/10" : "text-neutral-600 hover:bg-neutral-200",
+                                )}
+                              >
+                                <MoreVertical className="h-4 w-4" />
+                              </button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent
+                              side="right"
+                              align="start"
+                              className={cn(
+                                "w-40 rounded-xl border p-1",
+                                isDark ? "border-white/10 bg-[#1c1c20] text-white" : "border-neutral-200 bg-white text-neutral-900",
+                              )}
                             >
-                              {msg.content}
-                            </ReactMarkdown>
-                          </div>
-                        ))
+                              <DropdownMenuItem onSelect={() => handleTogglePin(chat)} className="cursor-pointer gap-2 rounded-lg">
+                                {chat.pinned ? <PinOff className="h-4 w-4" /> : <Pin className="h-4 w-4" />}
+                                {chat.pinned ? "Unpin" : "Pin"}
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onSelect={() => startRename(chat)} className="cursor-pointer gap-2 rounded-lg">
+                                <Pencil className="h-4 w-4" />
+                                Rename
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onSelect={() => handleDeleteChat(chat)}
+                                className="cursor-pointer gap-2 rounded-lg text-red-400 focus:text-red-300"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                                Delete
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </aside>
+              )}
+
+              <section className="flex min-h-[calc(100dvh-10rem)] min-w-0 flex-1 flex-col px-6">
+                {/* Panel toggle while the history is closed, like Gemini's. */}
+                {!historyOpen && (
+                  <div className="z-10 flex gap-1 pt-4 md:sticky md:top-[var(--nav-h,61px)]">
+                    <button
+                      onClick={() => setHistoryOpen(true)}
+                      aria-label="Open chat history"
+                      title="Open chat history"
+                      className={cn("rounded-full p-2 transition-colors", isDark ? "text-white/60 hover:bg-white/10 hover:text-white" : "text-neutral-500 hover:bg-neutral-200")}
+                    >
+                      <PanelLeftOpen className="h-5 w-5" />
+                    </button>
+                    <button
+                      onClick={handleNewChat}
+                      aria-label="New chat"
+                      title="New chat"
+                      className={cn("rounded-full p-2 transition-colors", isDark ? "text-white/60 hover:bg-white/10 hover:text-white" : "text-neutral-500 hover:bg-neutral-200")}
+                    >
+                      <SquarePen className="h-5 w-5" />
+                    </button>
+                  </div>
+                )}
+
+                <div className="mx-auto w-full max-w-3xl flex-1 space-y-10 py-12">
+                  {activeChat?.video_title && (
+                    <p
+                      className={cn(
+                        "mx-auto flex w-fit max-w-full items-center gap-2 rounded-full border px-3 py-1 text-xs",
+                        isDark ? "border-white/10 bg-white/5 text-white/60" : "border-neutral-200 bg-white text-neutral-600",
                       )}
-                      {isReplying && (
+                    >
+                      <ChestifyLogo className="h-3 flex-shrink-0" title="" />
+                      <span className="truncate">About: {activeChat.video_title}</span>
+                    </p>
+                  )}
+
+                  {messages.length === 0 && !isReplying ? (
+                    <div className="flex flex-col items-center gap-4 pt-[12vh] text-center">
+                      <ChestifyLogo className="h-14" gradient={currentTheme.logo} title="" />
+                      <h2
+                        className={cn(
+                          "bg-gradient-to-r bg-clip-text text-3xl font-semibold text-transparent",
+                          currentTheme.gradient,
+                        )}
+                      >
+                        Ask anything
+                      </h2>
+                      <p className={cn("max-w-md text-sm", isDark ? "text-white/50" : "text-neutral-500")}>
+                        Ask about a topic, or open <span className="font-medium">AI Analysis</span> on a video in your Library to
+                        dig into its fact-check.
+                      </p>
+                    </div>
+                  ) : (
+                    messages.map((msg) =>
+                      msg.role === "user" ? (
                         <div
+                          key={msg.id}
                           className={cn(
-                            "mr-auto flex items-center gap-2 rounded-lg p-4 text-sm",
-                            isDark ? "bg-white/5 border border-white/10 text-white/60" : "bg-neutral-100 border border-neutral-200 text-neutral-500",
+                            "ml-auto w-fit max-w-[80%] rounded-3xl px-5 py-3 leading-7",
+                            isDark ? "bg-white/10 text-white" : "bg-neutral-100 text-neutral-900",
                           )}
                         >
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                          Thinking...
+                          <p className="whitespace-pre-wrap">{msg.content}</p>
                         </div>
+                      ) : (
+                        <div key={msg.id} className={cn("leading-7", isDark ? "text-white/90" : "text-neutral-900")}>
+                          <ReactMarkdown
+                            components={{
+                              h1: ({ children }) => <h1 className="text-xl font-semibold mb-3">{children}</h1>,
+                              h2: ({ children }) => <h2 className="text-lg font-semibold mb-3">{children}</h2>,
+                              h3: ({ children }) => <h3 className="text-base font-semibold mb-2">{children}</h3>,
+                              p: ({ children }) => <p className="mb-4 last:mb-0">{children}</p>,
+                              ul: ({ children }) => <ul className="list-disc pl-5 mb-4 space-y-1.5">{children}</ul>,
+                              ol: ({ children }) => <ol className="list-decimal pl-5 mb-4 space-y-1.5">{children}</ol>,
+                              a: ({ children, href }) => (
+                                <a
+                                  href={href}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className={cn("underline underline-offset-2 hover:opacity-80", currentTheme.icon)}
+                                >
+                                  {children}
+                                </a>
+                              ),
+                              code: ({ children }) => (
+                                <code className={cn("rounded px-1 py-0.5 text-sm", isDark ? "bg-white/10" : "bg-neutral-200")}>{children}</code>
+                              ),
+                            }}
+                          >
+                            {msg.content}
+                          </ReactMarkdown>
+                        </div>
+                      ),
+                    )
+                  )}
+                  {isReplying && (
+                    <p className={cn("flex items-center gap-2 text-sm", isDark ? "text-white/50" : "text-neutral-500")}>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Thinking...
+                    </p>
+                  )}
+                  {chatError && <p className="text-sm text-red-400">{chatError}</p>}
+                  {/* scroll-mb keeps the newest message above the pinned input. */}
+                  <div ref={messagesEndRef} className="scroll-mb-40" />
+                </div>
+
+                {/* Pinned to the bottom while the page scrolls. A plain blur (no tint)
+                    that fades in at the top hides text passing behind it. */}
+                <div className="sticky bottom-0 mx-auto w-full max-w-3xl pb-4 pt-8 backdrop-blur-xl [mask-image:linear-gradient(to_bottom,transparent,black_2rem)]">
+                  <div
+                    className={cn(
+                      "flex items-center gap-2 rounded-full border py-2 pl-5 pr-2",
+                      isDark ? "border-white/10 bg-[#18181b]/90" : "border-neutral-200 bg-white shadow-sm",
+                    )}
+                  >
+                    <input
+                      placeholder={activeChat?.video_title ? "Ask about this video..." : "Ask Chestify..."}
+                      value={chatInput}
+                      onChange={(e) => setChatInput(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && handleSendMessage()}
+                      className={cn(
+                        "h-10 min-w-0 flex-1 bg-transparent text-base outline-none",
+                        isDark ? "text-white placeholder:text-white/40" : "text-neutral-900 placeholder:text-neutral-400",
                       )}
-                      {chatError && <p className="text-sm text-red-400">{chatError}</p>}
-                      <div ref={messagesEndRef} />
-                    </div>
-                    <div className="flex gap-2 mb-4 flex-wrap">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleStarterQuestion("Summarize my Coding videos")}
-                        className={cn(
-                          "rounded-full text-xs",
-                          isDark
-                            ? "bg-white/5 border-white/20 text-white/70 hover:bg-white/10 hover:text-white"
-                            : "bg-neutral-50 border-neutral-300 text-neutral-600 hover:bg-neutral-100",
-                        )}
-                      >
-                        Summarize my Coding videos
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleStarterQuestion("Quiz me on Physics")}
-                        className={cn(
-                          "rounded-full text-xs",
-                          isDark
-                            ? "bg-white/5 border-white/20 text-white/70 hover:bg-white/10 hover:text-white"
-                            : "bg-neutral-50 border-neutral-300 text-neutral-600 hover:bg-neutral-100",
-                        )}
-                      >
-                        Quiz me on Physics
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleStarterQuestion("What claims were debunked?")}
-                        className={cn(
-                          "rounded-full text-xs",
-                          isDark
-                            ? "bg-white/5 border-white/20 text-white/70 hover:bg-white/10 hover:text-white"
-                            : "bg-neutral-50 border-neutral-300 text-neutral-600 hover:bg-neutral-100",
-                        )}
-                      >
-                        What claims were debunked?
-                      </Button>
-                    </div>
-                    <div className="flex gap-2">
-                      <Input
-                        placeholder="Type your question..."
-                        value={chatInput}
-                        onChange={(e) => setChatInput(e.target.value)}
-                        onKeyDown={(e) => e.key === "Enter" && handleSendMessage()}
-                        className={cn(
-                          isDark
-                            ? "bg-white/5 border-white/20 text-white placeholder:text-white/40"
-                            : "bg-white border-neutral-300 text-neutral-900 placeholder:text-neutral-400",
-                        )}
-                      />
-                      <Button
-                        onClick={handleSendMessage}
-                        disabled={!chatInput.trim() || isReplying}
-                        className={cn(
-                          "rounded-full border",
-                          isDark
-                            ? currentTheme.activeTab
-                            : currentTheme.activeTabLight,
-                        )}
-                      >
-                        <Send className="w-4 h-4" />
-                      </Button>
-                    </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              </div>
+                    />
+                    <Button
+                      onClick={handleSendMessage}
+                      disabled={!chatInput.trim() || isReplying}
+                      aria-label="Send"
+                      className={cn("h-10 w-10 rounded-full border p-0", isDark ? currentTheme.activeTab : currentTheme.activeTabLight)}
+                    >
+                      <Send className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  <p className={cn("mt-2 text-center text-xs", isDark ? "text-white/35" : "text-neutral-400")}>
+                    Chestify AI can make mistakes. Check the sources on each video.
+                  </p>
+                </div>
+              </section>
             </div>
           )}
           {activeTab === "progress" && (
             <ProgressTab
               stats={progressStats}
+              theme={currentTheme}
               isDark={isDark}
               displayName={userData?.displayName || "Chestify user"}
               initials={userData?.initials || "C"}
@@ -2076,7 +2325,7 @@ export default function ChestifyApp() {
         >
           <div className="container mx-auto px-6">
             <p className={cn("text-center text-sm font-light", isDark ? "text-white/40" : "text-neutral-500")}>
-              Copyright © 2026 Chestify | Capstone project - Group 12
+              Copyright © Chestify 2026
             </p>
           </div>
         </footer>
