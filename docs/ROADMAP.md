@@ -20,6 +20,8 @@
 - Rate limits per user and at the edge.
 - Separate development and production environments, with CI checks.
 - Monitoring, cost alerts and Firestore backups.
+- Keep the video reader up to date automatically (a weekly update check), since
+  platforms change their pages often.
 
 ## Done recently
 
