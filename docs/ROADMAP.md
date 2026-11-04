@@ -2,18 +2,13 @@
 
 ## Next
 
-- Shorter, more to-the-point chat replies.
-- Web search in chat for questions beyond a saved video.
-- Check every supported platform end to end, especially X.
-- Process several videos in parallel instead of one at a time.
-- Stronger sources for made-up claims: cite fact-checkers directly when they
-  exist, and separate related context from real evidence.
-- Retry automatically when a platform briefly refuses to load a video.
-- Settings: display name, profile picture, password.
+- Confirm every platform from production (YouTube and Instagram can block
+  datacenter servers).
+- Fact-check text posts (e.g. on X) and news articles, not just videos
+  (experiment).
 
 ## Later
 
-- Experiment: fact-check text posts (e.g. on X) and news articles, not just videos.
 - Chat that knows your whole library, not just one video.
 - Better extraction when a video has no captions.
 - Account deletion and data export.
@@ -25,3 +20,9 @@
 - Rate limits per user and at the edge.
 - Separate development and production environments, with CI checks.
 - Monitoring, cost alerts and Firestore backups.
+
+## Done recently
+
+Shorter chat replies, optional web search in chat, parallel video
+processing, automatic retries, clearer errors for unsupported links, stronger
+sources for made-up claims, and a settings page.
