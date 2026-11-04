@@ -9,7 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { DirectionAwareHover } from "@/components/direction-aware-hover"
-import { CheckCircle2, AlertTriangle, Loader2, Send, Plus, XCircle, HelpCircle, X, RotateCw, ExternalLink, Trash2, ClipboardPaste, Search, PanelLeftClose, PanelLeftOpen, SquarePen, MoreVertical, Pin, PinOff, Pencil, MessageSquare, Sparkles, TrendingUp, ShieldCheck, Trophy, Compass, Flame, LockKeyhole } from "lucide-react"
+import { CheckCircle2, AlertTriangle, Loader2, Send, Plus, XCircle, HelpCircle, X, RotateCw, ExternalLink, Trash2, ClipboardPaste, Search, Globe, PanelLeftClose, PanelLeftOpen, SquarePen, MoreVertical, Pin, PinOff, Pencil, MessageSquare, Sparkles, TrendingUp, ShieldCheck, Trophy, Compass, Flame, LockKeyhole } from "lucide-react"
 import { computeProgress, HEATMAP_WEEKS, type ProgressStats } from "@/lib/progress"
 import { cn } from "@/lib/utils"
 import { auth, db, googleProvider } from "@/lib/firebase/config"
@@ -33,6 +33,7 @@ import { addVideoToFirestore } from "@/lib/firestore-helpers"
 import { ThemeControls } from "@/components/theme-controls"
 import { UserProfileDropdown } from "@/components/user-profile-dropdown"
 import { EmailAuthForm } from "@/components/email-auth-form"
+import { SettingsDialog } from "@/components/settings-dialog"
 import { ChestifyLogo } from "@/components/chestify-logo"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { SmallThumb, ThumbnailPlaceholder, platformName } from "@/components/thumbnail-placeholder"
@@ -112,6 +113,7 @@ type VideoItem = {
   trust_note?: string
   sources_for?: CitedSource[]
   sources_against?: CitedSource[]
+  sources_context?: CitedSource[]
   sources?: CitedSource[]
   fact_check?: {
     status?: string
@@ -127,6 +129,8 @@ type ChatMessage = {
   id: string
   role: "user" | "assistant"
   content: string
+  // Set on answers that used web search.
+  sources?: CitedSource[]
 }
 
 type ChatSummary = {
@@ -277,13 +281,18 @@ function ScorePill({ state, score, className }: { state: Verdict; score?: number
   )
 }
 
-// Up to three citations for the card: contradicting first, then supporting,
-// then (for older items) the raw grounding results.
-function cardSources(item: VideoItem): CitedSource[] {
-  const seen = new Set<string>()
-  return [...(item.sources_against || []), ...(item.sources_for || []), ...(item.sources || [])]
-    .filter((s) => s.url && !seen.has(s.url) && seen.add(s.url))
-    .slice(0, 3)
+// Up to three citations for the card: direct evidence (contradicting first),
+// else related background marked as such, else (older items) raw search results.
+function cardSources(item: VideoItem): { list: CitedSource[]; related: boolean } {
+  const pick = (sources: CitedSource[]) => {
+    const seen = new Set<string>()
+    return sources.filter((s) => s.url && !seen.has(s.url) && seen.add(s.url)).slice(0, 3)
+  }
+  const direct = pick([...(item.sources_against || []), ...(item.sources_for || [])])
+  if (direct.length) return { list: direct, related: false }
+  const context = pick(item.sources_context || [])
+  if (context.length) return { list: context, related: true }
+  return { list: pick(item.sources || []), related: false }
 }
 
 // Active theme definition, passed to module-level components so their accents follow it.
@@ -927,6 +936,8 @@ export default function ChestifyApp() {
   const [activeChatId, setActiveChatId] = useState<string | null>(null)
   const [isReplying, setIsReplying] = useState(false)
   const [chatError, setChatError] = useState<string | null>(null)
+  // Opt-in per message: web search uses a limited daily allowance.
+  const [webSearch, setWebSearch] = useState(false)
   // History panel: open by default on desktop, a slide-over on phones.
   const [historyOpen, setHistoryOpen] = useState(false)
   const [renamingId, setRenamingId] = useState<string | null>(null)
@@ -944,6 +955,9 @@ export default function ChestifyApp() {
   const [authLoading, setAuthLoading] = useState(true)
   const [authError, setAuthError] = useState<string | null>(null)
   const [showEmailAuth, setShowEmailAuth] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  // Profile picture stored on users/{uid} (a small data URL), if the user set one.
+  const [avatar, setAvatar] = useState<string | null>(null)
   // Bumped after a new email account's name is saved; Firebase mutates the
   // same User object, so this re-renders the header with the new name.
   const [, setProfileVersion] = useState(0)
@@ -990,6 +1004,15 @@ export default function ChestifyApp() {
     media.addEventListener("change", update)
     return () => media.removeEventListener("change", update)
   }, [])
+
+  // Keeps the stored profile picture in sync with users/{uid}.
+  useEffect(() => {
+    if (!user) {
+      setAvatar(null)
+      return
+    }
+    return onSnapshot(doc(db, "users", user.uid), (snap) => setAvatar((snap.data()?.avatar as string) || null))
+  }, [user])
 
   // Lists the user's 30 most recently used chats for the history panel.
   useEffect(() => {
@@ -1139,7 +1162,7 @@ export default function ChestifyApp() {
     ? {
         displayName: user.displayName || user.email?.split("@")[0] || "Chestify user",
         email: user.email || "",
-        photoURL: user.photoURL || "",
+        photoURL: avatar || user.photoURL || "",
         initials: (user.displayName || user.email || "C")
           .split(/\s+/)
           .map((part) => part[0])
@@ -1206,10 +1229,20 @@ export default function ChestifyApp() {
     return chatRef.id
   }
 
-  const addChatMessage = async (chatId: string, role: ChatMessage["role"], content: string) => {
+  const addChatMessage = async (
+    chatId: string,
+    role: ChatMessage["role"],
+    content: string,
+    sources?: CitedSource[],
+  ) => {
     if (!user) return
     const chatRef = doc(db, "users", user.uid, "chats", chatId)
-    await addDoc(collection(chatRef, "messages"), { role, content, created_at: Timestamp.now() })
+    await addDoc(collection(chatRef, "messages"), {
+      role,
+      content,
+      ...(sources?.length ? { sources } : {}),
+      created_at: Timestamp.now(),
+    })
     await updateDoc(chatRef, { updated_at: Timestamp.now() })
   }
 
@@ -1239,13 +1272,13 @@ export default function ChestifyApp() {
           "Content-Type": "application/json",
           ...(idToken ? { Authorization: `Bearer ${idToken}` } : {}),
         },
-        body: JSON.stringify({ message: userMessage, context, history }),
+        body: JSON.stringify({ message: userMessage, context, history, web_search: webSearch }),
       })
 
       const data = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(data.detail || "Chat API failed")
 
-      await addChatMessage(chatId, "assistant", data.response)
+      await addChatMessage(chatId, "assistant", data.response, data.sources)
     } catch (error) {
       console.error("Chat error:", error)
       setChatError(
@@ -1369,8 +1402,12 @@ export default function ChestifyApp() {
     if (!user) return
 
     const state = getDisplayState(item)
-    const sourceLines = [...(item.sources_against || []), ...(item.sources_for || [])]
-      .map((s) => `- ${s.domain}: ${s.point || s.title} (${s.url})`)
+    const sourceLines = [
+      ...(item.sources_against || []).map((s) => ({ ...s, kind: "contradicts" })),
+      ...(item.sources_for || []).map((s) => ({ ...s, kind: "supports" })),
+      ...(item.sources_context || []).map((s) => ({ ...s, kind: "related background" })),
+    ]
+      .map((s) => `- ${s.domain} (${s.kind}): ${s.point || s.title} (${s.url})`)
       .join("\n")
     const context = [
       `Title: ${item.title}`,
@@ -1626,6 +1663,7 @@ export default function ChestifyApp() {
                 <UserProfileDropdown
                   isDark={isDark}
                   onSignOut={handleSignOut}
+                  onOpenSettings={() => setSettingsOpen(true)}
                   user={userData}
                   currentTheme={currentTheme}
                 />
@@ -1641,6 +1679,17 @@ export default function ChestifyApp() {
             </div>
           </div>
         </header>
+        {user && (
+          <SettingsDialog
+            open={settingsOpen}
+            onOpenChange={setSettingsOpen}
+            user={user}
+            avatar={avatar}
+            isDark={isDark}
+            buttonClassName={cn(currentTheme.buttonGradient, currentTheme.buttonText)}
+            onProfileUpdated={() => setProfileVersion((v) => v + 1)}
+          />
+        )}
         <main
           className={cn(
             "flex-1",
@@ -1782,9 +1831,10 @@ export default function ChestifyApp() {
                             >
                               <HighlightedText text={oneLine} highlight={failed ? undefined : item.highlight} className={meta.highlight} />
                             </p>
-                            {failed ? null : sources.length ? (
+                            {failed ? null : sources.list.length ? (
                               <div className="flex flex-wrap gap-x-3 gap-y-1">
-                                {sources.map((source) => (
+                                {sources.related && <span className="text-xs text-white/50">Related:</span>}
+                                {sources.list.map((source) => (
                                   <a
                                     key={source.url}
                                     href={source.url}
@@ -1922,7 +1972,7 @@ export default function ChestifyApp() {
 
                 <div className="flex flex-wrap items-center justify-center gap-2 text-xs">
                   <span className={isDark ? "text-white/40" : "text-neutral-500"}>Works with</span>
-                  {["TikTok", "YouTube Shorts", "Instagram Reels", "X"].map((platform) => (
+                  {["TikTok", "YouTube Shorts", "Instagram Reels", "Facebook", "X"].map((platform) => (
                     <span
                       key={platform}
                       className={cn(
@@ -2257,6 +2307,29 @@ export default function ChestifyApp() {
                           >
                             {msg.content}
                           </ReactMarkdown>
+                          {msg.sources && msg.sources.length > 0 && (
+                            <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+                              <span className={cn("flex items-center gap-1", isDark ? "text-white/40" : "text-neutral-500")}>
+                                <Globe className="h-3 w-3" />
+                                Sources
+                              </span>
+                              {msg.sources.map((source) => (
+                                <a
+                                  key={source.url}
+                                  href={source.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  title={source.title}
+                                  className={cn(
+                                    "rounded-full border px-2.5 py-1 transition-colors",
+                                    isDark ? "border-white/10 bg-white/5 text-white/70 hover:bg-white/10" : "border-neutral-200 bg-neutral-50 text-neutral-700 hover:bg-neutral-100",
+                                  )}
+                                >
+                                  {source.domain || source.title}
+                                </a>
+                              ))}
+                            </div>
+                          )}
                         </div>
                       ),
                     )
@@ -2264,7 +2337,7 @@ export default function ChestifyApp() {
                   {isReplying && (
                     <p className={cn("flex items-center gap-2 text-sm", isDark ? "text-white/50" : "text-neutral-500")}>
                       <Loader2 className="h-4 w-4 animate-spin" />
-                      Thinking...
+                      {webSearch ? "Searching the web..." : "Thinking..."}
                     </p>
                   )}
                   {chatError && <p className="text-sm text-red-400">{chatError}</p>}
@@ -2291,6 +2364,25 @@ export default function ChestifyApp() {
                         isDark ? "text-white placeholder:text-white/40" : "text-neutral-900 placeholder:text-neutral-400",
                       )}
                     />
+                    <button
+                      type="button"
+                      onClick={() => setWebSearch((on) => !on)}
+                      aria-pressed={webSearch}
+                      title={webSearch ? "Web search on: answers check Google (limited per day)" : "Turn on web search"}
+                      className={cn(
+                        "flex h-10 items-center gap-1.5 rounded-full border px-3 text-sm transition-colors",
+                        webSearch
+                          ? isDark
+                            ? currentTheme.activeTab
+                            : currentTheme.activeTabLight
+                          : isDark
+                            ? "border-transparent text-white/50 hover:bg-white/10 hover:text-white"
+                            : "border-transparent text-neutral-500 hover:bg-neutral-100",
+                      )}
+                    >
+                      <Globe className="h-4 w-4" />
+                      <span className="hidden sm:inline">Web</span>
+                    </button>
                     <Button
                       onClick={handleSendMessage}
                       disabled={!chatInput.trim() || isReplying}
@@ -2301,7 +2393,9 @@ export default function ChestifyApp() {
                     </Button>
                   </div>
                   <p className={cn("mt-2 text-center text-xs", isDark ? "text-white/35" : "text-neutral-400")}>
-                    Chestify AI can make mistakes. Check the sources on each video.
+                    {webSearch
+                      ? "Web search is on: answers check Google, up to 5 searches a day."
+                      : "Chestify AI can make mistakes. Check the sources on each video."}
                   </p>
                 </div>
               </section>

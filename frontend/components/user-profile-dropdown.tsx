@@ -13,7 +13,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { LogOut } from "lucide-react"
+import { LogOut, Settings } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 interface UserData {
@@ -26,6 +26,7 @@ interface UserData {
 interface UserProfileDropdownProps {
   isDark: boolean
   onSignOut: () => void
+  onOpenSettings: () => void
   user?: UserData | null
   currentTheme: {
     icon: string
@@ -36,7 +37,7 @@ interface UserProfileDropdownProps {
 
 // Renders the user's avatar and Radix menu, wiring settings and sign-out
 // actions to the callbacks supplied by the parent page.
-export function UserProfileDropdown({ isDark, onSignOut, user, currentTheme }: UserProfileDropdownProps) {
+export function UserProfileDropdown({ isDark, onSignOut, onOpenSettings, user, currentTheme }: UserProfileDropdownProps) {
   // Avoids rendering an empty account control until Firebase user data exists.
   if (!user) {
     return null
@@ -80,6 +81,18 @@ export function UserProfileDropdown({ isDark, onSignOut, user, currentTheme }: U
           </div>
         </DropdownMenuLabel>
         <DropdownMenuSeparator className={isDark ? "bg-white/10" : "bg-neutral-200"} />
+        <DropdownMenuItem
+          onClick={onOpenSettings}
+          className={cn(
+            "cursor-pointer transition-colors",
+            isDark
+              ? `focus:bg-opacity-10 focus:${currentTheme.icon.replace('text-', 'text-')} hover:${currentTheme.icon.replace('text-', 'bg-')}/10`
+              : `focus:bg-opacity-20 focus:${currentTheme.icon.replace('text-', 'text-')} hover:${currentTheme.icon.replace('text-', 'bg-')}/20`,
+          )}
+        >
+          <Settings className="w-4 h-4 mr-2" />
+          Settings
+        </DropdownMenuItem>
         <DropdownMenuItem
           onClick={onSignOut}
           className={cn(
