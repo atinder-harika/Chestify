@@ -215,6 +215,8 @@ def _normalize_result(result: Dict, sources: List[Dict[str, Any]], response: Any
     used: set = set()
     sources_against = _match_cited_sources(result.get("sources_against"), sources, used, response)
     sources_for = _match_cited_sources(result.get("sources_for"), sources, used, response)
+    # Related background only; matched last so direct evidence keeps its sources.
+    sources_context = _match_cited_sources(result.get("sources_context"), sources, used, response)[:2]
     logger.info(
         f"Matched {len(sources_for)} supporting / {len(sources_against)} contradicting sources "
         f"from {[s['domain'] for s in sources]}"
@@ -259,6 +261,7 @@ def _normalize_result(result: Dict, sources: List[Dict[str, Any]], response: Any
         "trust_note": str(result.get("trust_note") or "").strip(),
         "sources_for": sources_for,
         "sources_against": sources_against,
+        "sources_context": sources_context,
         "sources": sources,
         # Kept for older clients and the chat context.
         "fact_check": {
@@ -280,6 +283,9 @@ URL: {url}
 Transcript: {transcript[:TRANSCRIPT_LIMIT]}
 
 **Step 1: find the MAIN claim** (the takeaway a viewer would repeat). Search for it.
+First look for an existing fact-check of this exact claim (e.g. Reuters Fact Check, AP Fact
+Check, AFP Fact Check, PolitiFact, Snopes, Lead Stories, Full Fact). If one exists, it is
+the strongest source: cite it.
 
 **Step 2: give an accuracy_score from 1 to 10** for how accurate the main claim is,
 based on the evidence (NOT how confident you are):
@@ -298,7 +304,10 @@ Rules:
    Above 8 needs at least 2 independent reliable sources.
 3. Weigh sources by quality, not count. Official bodies, peer-reviewed research and major
    outlets beat blogs and social posts. Sources that just repeat the video don't count.
-4. No relevant evidence -> accuracy_score null. Never default to 5.
+4. No relevant evidence -> accuracy_score null. Never default to 5. Exception: a claim that
+   would be widely reported if true (a public figure's announcement, a major event) but that no
+   credible outlet reports is likely fabricated. Score it as false and say so plainly, e.g.
+   "No credible outlet reports this donation".
 5. Opinions and jokes aren't scored; only check the factual claims inside them.
 
 **Step 3: write the verdict for a viewer who glances at it for 2 seconds.**
@@ -314,11 +323,14 @@ Rules:
 - conclusion: one short sentence of verification a viewer can trust.
 - score_reason: short note naming the rule applied, e.g. "Capped at 4: real donation, false recipient".
 - trust_note: if the video presents two opposing views, say which to trust and why; else "".
-- sources_for / sources_against: up to 3 each of the strongest search results that support /
-  contradict the main claim. Only cite pages you actually found in search. For each give the
-  publisher's site name (e.g. "Reuters"), its domain if you know it (e.g. "reuters.com"),
-  the search-result URL exactly as you received it, a short title, and the point it makes
-  (max 12 words).
+- sources_for / sources_against: up to 3 each of the strongest search results that DIRECTLY
+  support / contradict the main claim itself. A page about a different but related event
+  (e.g. another donation by the same person) does not count here.
+- sources_context: up to 2 results that are only related background (same person or topic,
+  but not addressing this claim). Leave it empty if there are none.
+- For every source: only cite pages you actually found in search. Give the publisher's site
+  name (e.g. "Reuters"), its domain if you know it (e.g. "reuters.com"), the search-result
+  URL exactly as you received it, a short title, and the point it makes (max 12 words).
 
 Also give a 2-3 sentence neutral summary, ONE category from: Physics, Chemistry, Biology,
 Math, Computer Science, History, Psychology, Health, Science, Technology, Politics, News,
@@ -338,7 +350,8 @@ Return ONLY valid JSON, no markdown:
   "conclusion": "max 25 words",
   "trust_note": "",
   "sources_for": [{{"site": "...", "domain": "...", "url": "...", "title": "...", "point": "..."}}],
-  "sources_against": [{{"site": "...", "domain": "...", "url": "...", "title": "...", "point": "..."}}]
+  "sources_against": [{{"site": "...", "domain": "...", "url": "...", "title": "...", "point": "..."}}],
+  "sources_context": [{{"site": "...", "domain": "...", "url": "...", "title": "...", "point": "..."}}]
 }}
 """
 
