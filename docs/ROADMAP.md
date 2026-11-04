@@ -10,7 +10,9 @@
 ## Later
 
 - Chat that knows your whole library, not just one video.
-- Better extraction when a video has no captions.
+- Understand videos without captions: transcribe speech, and read on-screen
+  text from frames.
+- Flag likely AI-generated or edited footage.
 - Account deletion and data export.
 
 ## Scaling
