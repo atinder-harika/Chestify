@@ -10,6 +10,7 @@ import io
 import json
 import logging
 import re
+import time
 from typing import Any, Dict, Optional
 
 import requests
@@ -57,11 +58,37 @@ def thumbnail_data_url(thumbnail_url: str) -> Optional[str]:
 
 
 class VideoExtractionError(Exception):
-    """Custom exception for video extraction errors"""
-    pass
+    """Extraction failure. The message is user-facing; `detail` keeps yt-dlp's raw error."""
+
+    def __init__(self, message: str, detail: str = ""):
+        super().__init__(message)
+        self.detail = detail
+
+
+# Errors that usually clear up on a second try: platform pages that briefly
+# come back incomplete (TikTok's "rehydration" error), timeouts, dropped
+# connections and server-side 5xx or rate-limit responses.
+_TRANSIENT_ERRORS = (
+    "rehydration", "timed out", "timeout", "connection", "temporarily",
+    "http error 5", "http error 429", "unable to download webpage",
+)
+_RETRY_DELAYS = (2, 5)
 
 
 def extract_video_info(url: str) -> Dict[str, Any]:
+    """extract_video_info_once, retried up to twice on transient platform errors."""
+    for attempt, delay in enumerate((*_RETRY_DELAYS, None)):
+        try:
+            return extract_video_info_once(url)
+        except VideoExtractionError as e:
+            message = f"{e} {e.detail}".lower()
+            if delay is None or not any(marker in message for marker in _TRANSIENT_ERRORS):
+                raise
+            logger.warning(f"Extraction attempt {attempt + 1} failed ({str(e)[:80]}); retrying in {delay}s")
+            time.sleep(delay)
+
+
+def extract_video_info_once(url: str) -> Dict[str, Any]:
     """
     Extract video metadata and transcript from URL
     
@@ -122,19 +149,26 @@ def extract_video_info(url: str) -> Dict[str, Any]:
             
     except yt_dlp.utils.DownloadError as e:
         error_msg = str(e)
-        
-        if "Private video" in error_msg:
-            raise VideoExtractionError("Video is private or unavailable")
-        elif "Video unavailable" in error_msg:
-            raise VideoExtractionError("Video not found or removed")
-        elif "Sign in" in error_msg:
-            raise VideoExtractionError("Video requires authentication")
+        logger.warning(f"yt-dlp failed for {url}: {error_msg[:300]}")
+        lowered = error_msg.lower()
+
+        if "private" in lowered:
+            message = "This video is private, so Chestify can't read it."
+        elif "video unavailable" in lowered or "removed" in lowered or "not available" in lowered:
+            message = "This video was removed or isn't available anymore."
+        elif "sign in" in lowered or "login" in lowered or "log in" in lowered:
+            message = "This video needs a login to view, so Chestify can't read it."
+        elif "no video could be found" in lowered:
+            message = "This post has no video. Chestify checks videos for now."
+        elif "unsupported url" in lowered or "[generic]" in lowered:
+            message = "This link isn't a supported video. Try TikTok, YouTube Shorts, Instagram Reels, Facebook or X."
         else:
-            raise VideoExtractionError(f"Failed to extract video: {error_msg}")
-            
+            message = "We couldn't read this video right now. Please try again later."
+        raise VideoExtractionError(message, detail=error_msg)
+
     except Exception as e:
         logger.error(f"Unexpected error extracting video: {str(e)}")
-        raise VideoExtractionError(f"Extraction failed: {str(e)}")
+        raise VideoExtractionError("We couldn't read this video right now. Please try again later.", detail=str(e))
 
 
 # Caption formats we know how to parse, in order of preference

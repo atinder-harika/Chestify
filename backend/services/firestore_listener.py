@@ -6,7 +6,9 @@ Review focus: Real-time Firestore listeners, duplicate protection, and processin
 
 import hashlib
 import logging
+import os
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from google.cloud.firestore_v1 import FieldFilter
 from config.firebase_config import get_firestore_client
@@ -18,7 +20,14 @@ logger = logging.getLogger(__name__)
 # Keys of items currently being processed. A key is removed when its item
 # finishes, so an item set back to 'processing' (retry) runs again.
 processed_items = set()
+_processed_lock = threading.Lock()
 listener_status = "inactive"
+
+# Videos are processed by a small worker pool, so one slow analysis doesn't
+# hold up everyone else's. Most of the time is spent waiting on yt-dlp and
+# Gemini, so threads are enough.
+PIPELINE_WORKERS = max(1, int(os.getenv("PIPELINE_WORKERS", "4")))
+_pipeline = ThreadPoolExecutor(max_workers=PIPELINE_WORKERS, thread_name_prefix="pipeline")
 
 # Firestore status shown by the UI for each verdict band.
 VERDICT_STATUS = {
@@ -127,20 +136,27 @@ def on_processing_snapshot(col_snapshot, changes, read_time):
         user_id = user_ref.id
         item_key = f"{user_id}_{item_doc.id}"
 
-        if item_key in processed_items:
-            continue
+        with _processed_lock:
+            if item_key in processed_items:
+                continue
+            processed_items.add(item_key)
 
+        logger.info(f"Found processing item {item_doc.id} for user {user_id}")
+        _pipeline.submit(_run_item, item_doc.reference, item_doc.id, item_key)
+
+
+def _run_item(item_ref, item_id: str, item_key: str):
+    """Worker-thread entry: re-check the item, process it, then release its key."""
+    try:
         # Snapshots can arrive late (e.g. our own mid-pipeline update). Re-read
         # so a finished item is never analyzed twice.
-        fresh = item_doc.reference.get()
-        if not fresh.exists or (fresh.to_dict() or {}).get('status') != 'processing':
-            continue
-
-        processed_items.add(item_key)
-        logger.info(f"Found processing item {item_doc.id} for user {user_id}")
-        try:
-            process_item(item_doc.reference, item_doc.id, fresh.to_dict())
-        finally:
+        fresh = item_ref.get()
+        if fresh.exists and (fresh.to_dict() or {}).get('status') == 'processing':
+            process_item(item_ref, item_id, fresh.to_dict())
+    except Exception:
+        logger.exception(f"Pipeline worker failed for {item_id}")
+    finally:
+        with _processed_lock:
             processed_items.discard(item_key)
 
 
