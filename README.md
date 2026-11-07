@@ -17,6 +17,24 @@ chat about a video and track what you've been learning.
 
 Live at **[chestify.atinder.dev](https://chestify.atinder.dev)**.
 
+## Why
+
+Short videos spread claims faster than anyone can check them. Chestify gives you a quick, sourced answer before you share or believe one.
+
+## How it works
+
+```mermaid
+flowchart LR
+    B[Browser] -->|saves a link| F[(Firestore)]
+    F --> A[FastAPI worker]
+    A --> Y[yt-dlp: captions and details]
+    A --> G[Gemini with Google Search]
+    A -->|writes the verdict| F
+    F -->|live update| B
+```
+
+The browser never waits on a long request. It saves the link, the backend picks it up, and the result appears on the card as soon as it's ready.
+
 ## Stack
 
 Next.js · Tailwind · Firebase (Auth, Firestore) · FastAPI · Google Gemini · yt-dlp
@@ -62,6 +80,15 @@ process every new video.
   GitHub Pages. The `NEXT_PUBLIC_*` values are repository variables.
 - **Backend:** Railway builds `backend/Dockerfile` on every push.
 - **Firestore rules:** `firebase deploy --only firestore:rules`.
+
+## Limitations and what's next
+
+- It reads captions and video details today. Audio, on-screen text and AI footage detection are on the [roadmap](docs/ROADMAP.md).
+- A verdict is a starting point, not a final ruling, so check the sources.
+
+## Credits
+
+Chestify started as a Sheridan College capstone project. Chahatbir Singh designed the original frontend, which the current interface builds on.
 
 ---
 
